@@ -1,13 +1,55 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+const API_URL = 'http://192.168.100.9/UAEMex/wsl/Checador/backend/api';
 
 export default function DashboardScreen() {
   const [mostrarDetalles, setMostrarDetalles] = useState(false);
+  const [userData, setUserData] = useState<any>(null);
+  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadUserData = async () => {
+      const storedData = await SecureStore.getItemAsync('userData');
+      if (storedData) {
+        const user = JSON.parse(storedData);
+        setUserData(user);
+        fetchDashboardData(user.id);
+      }
+    };
+    loadUserData();
+  }, []);
+
+  const fetchDashboardData = async (usuario_id: string | number) => {
+    try {
+      const res = await fetch(`${API_URL}/dashboard_app.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario_id })
+      });
+      const json = await res.json();
+      if (json.success) {
+        setDashboardData(json.dashboard);
+      }
+    } catch (e) {
+      console.log('Error fetching dashboard:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const userName = userData?.nombre || "Cargando...";
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {loading && (
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.7)', zIndex: 10, justifyContent: 'center', alignItems: 'center' }}>
+            <Text>Cargando información...</Text>
+          </View>
+        )}
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         
         {/* HEADER */}
@@ -18,7 +60,7 @@ export default function DashboardScreen() {
             </View>
             <View>
               <Text style={styles.welcomeText}>BIENVENIDO</Text>
-              <Text style={styles.userName}>Admin General</Text>
+              <Text style={styles.userName}>{userName}</Text>
             </View>
           </View>
           <View style={styles.headerRight}>
@@ -44,10 +86,10 @@ export default function DashboardScreen() {
           <Text style={[styles.label, { marginTop: 20, marginBottom: 10 }]}>PROGRESO DE HOY</Text>
           
           <View style={styles.grid4}>
-            <ProgressBox icon="log-in-outline" title="ENTRADA" time="--:--" />
-            <ProgressBox icon="cafe-outline" title="S. COMIDA" time="--:--" />
-            <ProgressBox icon="return-down-back-outline" title="V. COMIDA" time="--:--" />
-            <ProgressBox icon="log-out-outline" title="SALIDA" time="--:--" />
+            <ProgressBox icon="log-in-outline" title="ENTRADA" time={dashboardData?.progreso_hoy?.entrada || "--:--"} />
+            <ProgressBox icon="cafe-outline" title="S. COMIDA" time={dashboardData?.progreso_hoy?.salida_comida || "--:--"} />
+            <ProgressBox icon="return-down-back-outline" title="V. COMIDA" time={dashboardData?.progreso_hoy?.regreso_comida || "--:--"} />
+            <ProgressBox icon="log-out-outline" title="SALIDA" time={dashboardData?.progreso_hoy?.salida || "--:--"} />
           </View>
 
           <View style={styles.nextScanRow}>
@@ -60,7 +102,7 @@ export default function DashboardScreen() {
 
         {/* TARJETA 2: ESTADÍSTICAS */}
         <View style={styles.card}>
-          <Text style={[styles.label, { marginBottom: 10 }]}>ESTADÍSTICAS DE OCT 2026</Text>
+          <Text style={[styles.label, { marginBottom: 10 }]}>ESTADÍSTICAS DE {dashboardData?.mes_texto || "MES"}</Text>
           
           <View style={styles.warningBanner}>
             <Ionicons name="warning" size={20} color="#b45309" />
@@ -71,11 +113,11 @@ export default function DashboardScreen() {
 
           <View style={styles.statsRow}>
             <View style={styles.statBoxYellow}>
-              <Text style={styles.statNumYellow}>0</Text>
+              <Text style={styles.statNumYellow}>{dashboardData?.estadisticas?.retardos || 0}</Text>
               <Text style={styles.statLabelYellow}>RETARDOS</Text>
             </View>
             <View style={styles.statBoxRed}>
-              <Text style={styles.statNumRed}>5</Text>
+              <Text style={styles.statNumRed}>{dashboardData?.estadisticas?.inasistencias || 0}</Text>
               <Text style={styles.statLabelRed}>INASISTENCIAS</Text>
             </View>
           </View>
@@ -99,11 +141,17 @@ export default function DashboardScreen() {
               </View>
               
               <View style={styles.inasistenciaList}>
-                <InasistenciaRow date="01/10/2026" />
-                <InasistenciaRow date="02/10/2026" />
-                <InasistenciaRow date="05/10/2026" />
-                <InasistenciaRow date="06/10/2026" />
-                <InasistenciaRow date="07/10/2026" isLast />
+                {dashboardData?.estadisticas?.fechas_inasistencias && dashboardData.estadisticas.fechas_inasistencias.length > 0 ? (
+                  dashboardData.estadisticas.fechas_inasistencias.map((fecha: string, index: number) => (
+                    <InasistenciaRow 
+                      key={index} 
+                      date={fecha} 
+                      isLast={index === dashboardData.estadisticas.fechas_inasistencias.length - 1} 
+                    />
+                  ))
+                ) : (
+                  <View style={{ padding: 12 }}><Text style={{ color: '#7f1d1d' }}>Sin inasistencias este mes</Text></View>
+                )}
               </View>
             </View>
           )}
@@ -125,9 +173,18 @@ export default function DashboardScreen() {
         </View>
 
         <View style={[styles.card, { marginBottom: 40, paddingHorizontal: 0, paddingVertical: 0 }]}>
-          <JornadaRow date="Lunes 31 de Ago" time="Ent. 08:00 · Sal. 17:00" />
-          <JornadaRow date="Domingo 30 de Ago" time="Ent. 08:00 · Sal. 17:00" />
-          <JornadaRow date="Sábado 29 de Ago" time="Ent. 08:00 · Sal. 17:00" noBorder />
+          {dashboardData?.ultimas_jornadas && dashboardData.ultimas_jornadas.length > 0 ? (
+            dashboardData.ultimas_jornadas.map((jornada: any, index: number) => (
+              <JornadaRow 
+                key={index} 
+                date={jornada.fecha_formateada} 
+                time={`Ent. ${jornada.entrada} · Sal. ${jornada.salida}`} 
+                noBorder={index === dashboardData.ultimas_jornadas.length - 1} 
+              />
+            ))
+          ) : (
+            <View style={{ padding: 20 }}><Text style={{ color: '#64748b', textAlign: 'center' }}>No hay jornadas recientes</Text></View>
+          )}
         </View>
 
       </ScrollView>
