@@ -9,12 +9,12 @@ export default function Index(){
   useEffect(() => {
     const checkSession = async ()=>{
            try {
-        // Buscamos si existe un token guardado previamente 
+        // Buscamos si existe sesión guardada previamente 
         const token = await SecureStore.getItemAsync('userToken');
+        const userData = await SecureStore.getItemAsync('userData');
 
-        if(token){
-          // Si SÍ hay sesión, lo mandamos al dashboard (tab)
-          router.replace('/(tab)');
+        if (token || userData) {
+          router.replace('/scanner' as any);
         } else {
           // Si NO hay sesión, lo mandamos al login
           router.replace('/login' as any);
@@ -35,6 +35,7 @@ export default function Index(){
         <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
+    
   }
   return null;
 }

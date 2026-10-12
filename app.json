@@ -8,7 +8,13 @@
     "scheme": "checadormovil",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Permite usar la cámara para escanear el código QR de asistencia de la oficina.",
+        "NSLocationWhenInUseUsageDescription": "Se requiere tu ubicación GPS para verificar que estés dentro del perímetro de la oficina al checar.",
+        "NSFaceIDUsageDescription": "Permite ingresar a la aplicación usando Face ID."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +23,14 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ]
     },
     "web": {
       "output": "static",
@@ -33,7 +46,25 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permite usar la cámara para escanear el código QR de asistencia de la oficina."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Se requiere tu ubicación GPS para verificar que estés dentro del perímetro de la oficina al checar."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Permite ingresar a la aplicación usando Face ID."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

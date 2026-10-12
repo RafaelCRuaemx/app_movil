@@ -1,114 +1,256 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, RefreshControl, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-const API_URL = 'http://192.168.100.9/UAEMex/wsl/Checador/backend/api';
+import * as Location from 'expo-location';
 
-export default function DashboardScreen() {
-  const [mostrarDetalles, setMostrarDetalles] = useState(false);
+import { API_URL } from '../../config/api';
+
+export default function TabIndexScreen() {
   const [userData, setUserData] = useState<any>(null);
   const [dashboardData, setDashboardData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [mostrarDetalles, setMostrarDetalles] = useState(false);
+  const [registrandoHO, setRegistrandoHO] = useState(false);
 
-  useEffect(() => {
-    const loadUserData = async () => {
-      const storedData = await SecureStore.getItemAsync('userData');
-      if (storedData) {
-        const user = JSON.parse(storedData);
-        setUserData(user);
-        fetchDashboardData(user.id);
-      }
-    };
-    loadUserData();
-  }, []);
-
-  const fetchDashboardData = async (usuario_id: string | number) => {
+  const loadData = async () => {
     try {
-      const res = await fetch(`${API_URL}/dashboard_app.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usuario_id })
-      });
-      const json = await res.json();
-      if (json.success) {
-        setDashboardData(json.dashboard);
+      const stored = await SecureStore.getItemAsync('userData');
+      if (stored) {
+        const user = JSON.parse(stored);
+        setUserData(user);
+        
+        const res = await fetch(`${API_URL}/dashboard_app.php`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usuario_id: user.id })
+        });
+        const json = await res.json();
+        if (json.success) {
+          setDashboardData(json.dashboard);
+        }
       }
     } catch (e) {
-      console.log('Error fetching dashboard:', e);
-    } finally {
-      setLoading(false);
+      console.log('Error fetch dashboard:', e);
     }
   };
 
-  const userName = userData?.nombre || "Cargando...";
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  };
+
+  const registrarHomeOfficeDirecto = async () => {
+    if (!userData?.id) return;
+    const pasoActual = dashboardData?.hero_btn_text?.toLowerCase() || 'asistencia';
+
+    Alert.alert(
+      'Registro Home Office',
+      `¿Deseas registrar tu ${pasoActual} en modalidad remota ahora?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: async () => {
+            setRegistrandoHO(true);
+            try {
+              let lat = null;
+              let lon = null;
+              let acc = null;
+              try {
+                let { status } = await Location.requestForegroundPermissionsAsync();
+                if (status === 'granted') {
+                  const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                  lat = loc.coords.latitude;
+                  lon = loc.coords.longitude;
+                  acc = loc.coords.accuracy;
+                }
+              } catch (e) {
+                // Silencioso si no se pudo obtener GPS
+              }
+
+              const res = await fetch(`${API_URL}/registrar_asistencia_home_office_app.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  usuario_id: userData.id,
+                  lat,
+                  lon,
+                  gps_acc: acc
+                })
+              });
+
+              const json = await res.json();
+              setRegistrandoHO(false);
+
+              if (json.success) {
+                Alert.alert('¡Excelente!', json.registro ? `Registro completado a las ${json.registro.hora} en modalidad remota.` : 'Asistencia remota registrada con éxito.');
+                await loadData();
+              } else {
+                Alert.alert('Aviso', json.motivo || json.message || 'No fue posible registrar asistencia.');
+              }
+            } catch (err: any) {
+              setRegistrandoHO(false);
+              Alert.alert('Error', 'No se pudo conectar con el servidor: ' + err.message);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const userName = userData?.nombre ? userData.nombre.split(' ')[0] : 'Colaborador';
+  const getInitials = (name: string) => {
+    if (!name) return '';
+    const parts = name.split(' ');
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  };
+
+  const getIconForStep = (step: string) => {
+    switch (step) {
+      case 'entrada': return 'sunny-outline';
+      case 'salida_comida': return 'cafe-outline';
+      case 'regreso_comida': return 'fast-food-outline';
+      case 'salida': return 'exit-outline';
+      default: return 'qr-code-outline';
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {loading && (
-          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.7)', zIndex: 10, justifyContent: 'center', alignItems: 'center' }}>
-            <Text>Cargando información...</Text>
-          </View>
-        )}
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         
         {/* HEADER */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <View style={styles.avatarMini}>
-              <Ionicons name="person" size={20} color="white" />
-            </View>
+            <TouchableOpacity style={styles.avatarMini} onPress={() => router.push('/(tab)/perfil')}>
+              <Text style={{ color: 'white', fontWeight: 'bold' }}>{getInitials(userData?.nombre)}</Text>
+            </TouchableOpacity>
             <View>
-              <Text style={styles.welcomeText}>BIENVENIDO</Text>
+              <Text style={styles.welcomeText}>HOLA,</Text>
               <Text style={styles.userName}>{userName}</Text>
             </View>
           </View>
           <View style={styles.headerRight}>
-            <TouchableOpacity onPress={() => router.replace('/login' as any)}>
-              <Ionicons name="log-out-outline" size={26} color="#64748b" />
+            <TouchableOpacity onPress={() => loadData()}>
+              <Ionicons name="notifications-outline" size={24} color="#64748b" />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* TARJETA 1: TURNO Y PROGRESO */}
+        {/* BANNER HOME OFFICE */}
+        {dashboardData?.es_home_office && (
+          <View style={styles.homeOfficeCard}>
+            <View style={styles.hoIconCircle}>
+              <Ionicons name="home" size={20} color="#0284c7" />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.hoTitle}>Modalidad Home Office Activa</Text>
+              <Text style={styles.hoSubtitle}>
+                Hoy trabajas de forma remota. Puedes checar directamente sin restricciones de red ni distancia de oficina.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* PROGRESO DE HOY (STEPPER) */}
         <View style={styles.card}>
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.label}>OFICINA</Text>
-              <Text style={styles.value}>OFICINA TEXCOCO</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={styles.label}>TURNO</Text>
-              <Text style={styles.value}>17:00 a 17:25</Text>
-            </View>
+          <View style={[styles.rowBetween, { marginBottom: 15 }]}>
+            <Text style={styles.label}>PROGRESO DE HOY</Text>
+            <Text style={styles.label}>{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase()}</Text>
           </View>
 
-          <Text style={[styles.label, { marginTop: 20, marginBottom: 10 }]}>PROGRESO DE HOY</Text>
-          
           <View style={styles.grid4}>
-            <ProgressBox icon="log-in-outline" title="ENTRADA" time={dashboardData?.progreso_hoy?.entrada || "--:--"} />
-            <ProgressBox icon="cafe-outline" title="S. COMIDA" time={dashboardData?.progreso_hoy?.salida_comida || "--:--"} />
-            <ProgressBox icon="return-down-back-outline" title="V. COMIDA" time={dashboardData?.progreso_hoy?.regreso_comida || "--:--"} />
-            <ProgressBox icon="log-out-outline" title="SALIDA" time={dashboardData?.progreso_hoy?.salida || "--:--"} />
+            <ProgressBox 
+              icon="sunny" 
+              title="Entrada" 
+              time={dashboardData?.progreso_hoy?.entrada || '--:--'} 
+              isActive={dashboardData?.proximo_paso === 'entrada'}
+            />
+            <ProgressBox 
+              icon="cafe" 
+              title="A Comer" 
+              time={dashboardData?.progreso_hoy?.salida_comida || '--:--'} 
+              isActive={dashboardData?.proximo_paso === 'salida_comida'}
+            />
+            <ProgressBox 
+              icon="fast-food" 
+              title="Regreso" 
+              time={dashboardData?.progreso_hoy?.regreso_comida || '--:--'} 
+              isActive={dashboardData?.proximo_paso === 'regreso_comida'}
+            />
+            <ProgressBox 
+              icon="exit" 
+              title="Salida" 
+              time={dashboardData?.progreso_hoy?.salida || '--:--'} 
+              isActive={dashboardData?.proximo_paso === 'salida'}
+            />
           </View>
 
-          <View style={styles.nextScanRow}>
-            <View style={styles.scanBadge}>
-              <Text style={styles.scanBadgeText}>Escanear Entrada</Text>
+          {dashboardData?.proximo_paso === 'completo' ? (
+            <View style={styles.successBanner}>
+              <Ionicons name="checkmark-circle" size={20} color="#16a34a" />
+              <Text style={styles.successBannerText}>Jornada completada. ¡Buen descanso!</Text>
             </View>
-            <Text style={styles.nextScanText}>→ Siguiente escaneo</Text>
-          </View>
+          ) : (
+            <View style={styles.nextScanRow}>
+              <View style={styles.scanBadge}>
+                <Text style={styles.scanBadgeText}>Pendiente</Text>
+              </View>
+              <Text style={styles.nextScanText}>{dashboardData?.hero_btn_text || 'Registrar asistencia'}</Text>
+            </View>
+          )}
         </View>
 
-        {/* TARJETA 2: ESTADÍSTICAS */}
+        {/* ACCIONES DE REGISTRO */}
+        {dashboardData?.proximo_paso !== 'completo' && (
+          <View style={{ marginBottom: 25 }}>
+            {dashboardData?.es_home_office && (
+              <TouchableOpacity 
+                style={[styles.btnHomeOfficeAction, registrandoHO && { opacity: 0.7 }]} 
+                onPress={registrarHomeOfficeDirecto}
+                disabled={registrandoHO}
+              >
+                {registrandoHO ? (
+                  <ActivityIndicator size="small" color="#0369a1" style={{ marginRight: 8 }} />
+                ) : (
+                  <Ionicons name="cloud-upload-outline" size={22} color="#0369a1" style={{ marginRight: 8 }} />
+                )}
+                <Text style={styles.btnHomeOfficeActionText}>
+                  {registrandoHO ? 'Registrando remota...' : 'Checar Asistencia Remota (1-Tap)'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.bigScanBtn} onPress={() => router.push('/scanner')}>
+              <Ionicons name={getIconForStep(dashboardData?.proximo_paso)} size={24} color="white" style={{ marginRight: 10 }} />
+              <Text style={styles.bigScanBtnText}>
+                {dashboardData?.es_home_office ? 'O escanear código QR' : (dashboardData?.hero_btn_text || 'Escanear QR')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ESTADÍSTICAS MENSUALES Y AUDITORÍA DE FALTAS */}
         <View style={styles.card}>
-          <Text style={[styles.label, { marginBottom: 10 }]}>ESTADÍSTICAS DE {dashboardData?.mes_texto || "MES"}</Text>
-          
+          <Text style={[styles.label, { marginBottom: 15 }]}>RESUMEN DE {dashboardData?.mes_texto || 'ESTE MES'}</Text>
+
           <View style={styles.warningBanner}>
-            <Ionicons name="warning" size={20} color="#b45309" />
-            <Text style={styles.warningText}>
-              Recuerda que cada <Text style={{ fontWeight: 'bold' }}>3 retardos</Text> equivalen a <Text style={{ fontWeight: 'bold' }}>1 falta</Text>.
-            </Text>
+            <Ionicons name="information-circle" size={20} color="#b45309" />
+            <Text style={styles.warningText}>Recuerda que cada 3 retardos equivalen a 1 falta.</Text>
           </View>
 
           <View style={styles.statsRow}>
@@ -118,30 +260,23 @@ export default function DashboardScreen() {
             </View>
             <View style={styles.statBoxRed}>
               <Text style={styles.statNumRed}>{dashboardData?.estadisticas?.inasistencias || 0}</Text>
-              <Text style={styles.statLabelRed}>INASISTENCIAS</Text>
+              <Text style={styles.statLabelRed}>FALTAS (INC. RETARDOS)</Text>
             </View>
           </View>
 
-          <TouchableOpacity 
-            style={styles.btnOutline}
-            onPress={() => setMostrarDetalles(!mostrarDetalles)}
-          >
-            <Ionicons name={mostrarDetalles ? "chevron-up" : "list"} size={16} color="#475569" style={{ marginRight: 8 }} />
-            <Text style={styles.btnOutlineText}>
-              {mostrarDetalles ? "Ocultar detalles de fechas" : "Ver detalles de fechas"}
-            </Text>
+          <TouchableOpacity style={styles.btnOutline} onPress={() => setMostrarDetalles(!mostrarDetalles)}>
+            <Ionicons name={mostrarDetalles ? "chevron-up" : "chevron-down"} size={16} color="#475569" style={{ marginRight: 6 }} />
+            <Text style={styles.btnOutlineText}>{mostrarDetalles ? 'Ocultar detalles' : 'Ver detalles de incidencias'}</Text>
           </TouchableOpacity>
 
-          {/* CONTENEDOR DESPLEGABLE CON DISEÑO MEJORADO */}
-          {mostrarDetalles && (
+          {mostrarDetalles && dashboardData?.estadisticas && (
             <View style={styles.detallesContainer}>
               <View style={styles.inasistenciaHeader}>
-                <Ionicons name="person-remove-outline" size={16} color="#b91c1c" />
-                <Text style={styles.inasistenciaTitle}>Días de Inasistencia</Text>
+                <Ionicons name="warning" size={18} color="#b91c1c" />
+                <Text style={styles.inasistenciaTitle}>Faltas Directas</Text>
               </View>
-              
               <View style={styles.inasistenciaList}>
-                {dashboardData?.estadisticas?.fechas_inasistencias && dashboardData.estadisticas.fechas_inasistencias.length > 0 ? (
+                {dashboardData.estadisticas.fechas_inasistencias?.length > 0 ? (
                   dashboardData.estadisticas.fechas_inasistencias.map((fecha: string, index: number) => (
                     <InasistenciaRow 
                       key={index} 
@@ -150,19 +285,31 @@ export default function DashboardScreen() {
                     />
                   ))
                 ) : (
-                  <View style={{ padding: 12 }}><Text style={{ color: '#7f1d1d' }}>Sin inasistencias este mes</Text></View>
+                  <View style={{ padding: 12 }}><Text style={{ color: '#7f1d1d' }}>Sin faltas directas</Text></View>
+                )}
+              </View>
+
+              <View style={[styles.inasistenciaHeader, { marginTop: 20 }]}>
+                <Ionicons name="time" size={18} color="#d97706" />
+                <Text style={[styles.inasistenciaTitle, { color: '#d97706' }]}>Retardos Acumulados</Text>
+              </View>
+              <View style={[styles.inasistenciaList, { backgroundColor: '#fffbeb', borderColor: '#fcd34d' }]}>
+                {dashboardData.estadisticas.fechas_retardos?.length > 0 ? (
+                  dashboardData.estadisticas.fechas_retardos.map((fecha: string, index: number) => (
+                    <InasistenciaRow 
+                      key={index} 
+                      date={fecha} 
+                      isRetardo
+                      isLast={index === dashboardData.estadisticas.fechas_retardos.length - 1} 
+                    />
+                  ))
+                ) : (
+                  <View style={{ padding: 12 }}><Text style={{ color: '#b45309' }}>Sin retardos este mes</Text></View>
                 )}
               </View>
             </View>
           )}
-
         </View>
-
-        {/* BOTÓN GRANDE DE ESCANEO */}
-        <TouchableOpacity style={styles.bigScanBtn} onPress={() => router.push('/scanner')}>
-          <Ionicons name="qr-code-outline" size={24} color="white" style={{ marginRight: 10 }} />
-          <Text style={styles.bigScanBtnText}>Escanear Entrada</Text>
-        </TouchableOpacity>
 
         {/* ÚLTIMAS JORNADAS */}
         <View style={styles.recentHeader}>
@@ -192,22 +339,26 @@ export default function DashboardScreen() {
   );
 }
 
-// COMPONENTES REUTILIZABLES
-function ProgressBox({ icon, title, time }: { icon: any, title: string, time: string }) {
+function ProgressBox({ icon, title, time, isActive }: { icon: any, title: string, time: string, isActive?: boolean }) {
+  const isCompleted = time !== '--:--';
   return (
-    <View style={styles.progressBox}>
-      <Ionicons name={icon} size={22} color="#94a3b8" />
-      <Text style={styles.progressTitle}>{title}</Text>
-      <Text style={styles.progressTime}>{time}</Text>
+    <View style={[styles.progressBox, isActive && styles.progressBoxActive, isCompleted && styles.progressBoxCompleted]}>
+      <Ionicons 
+        name={isCompleted ? "checkmark-circle" : icon} 
+        size={22} 
+        color={isCompleted ? "#16a34a" : isActive ? "#0d6efd" : "#94a3b8"} 
+      />
+      <Text style={[styles.progressTitle, isActive && { color: '#0d6efd' }]}>{title}</Text>
+      <Text style={[styles.progressTime, isCompleted && { color: '#16a34a' }]}>{time}</Text>
     </View>
   );
 }
 
-function InasistenciaRow({ date, isLast }: { date: string, isLast?: boolean }) {
+function InasistenciaRow({ date, isLast, isRetardo }: { date: string, isLast?: boolean, isRetardo?: boolean }) {
   return (
-    <View style={[styles.inasistenciaRow, !isLast && styles.inasistenciaRowBorder]}>
-      <Ionicons name="calendar-outline" size={16} color="#b91c1c" style={{ marginRight: 10 }} />
-      <Text style={styles.inasistenciaDate}>{date}</Text>
+    <View style={[styles.inasistenciaRow, !isLast && (isRetardo ? styles.retardoRowBorder : styles.inasistenciaRowBorder)]}>
+      <Ionicons name="calendar-outline" size={16} color={isRetardo ? "#b45309" : "#b91c1c"} style={{ marginRight: 10 }} />
+      <Text style={[styles.inasistenciaDate, isRetardo && { color: '#b45309' }]}>{date}</Text>
     </View>
   );
 }
@@ -229,7 +380,6 @@ function JornadaRow({ date, time, noBorder }: { date: string, time: string, noBo
   );
 }
 
-// ESTILOS
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#f8fafc' },
   container: { flex: 1, paddingHorizontal: 16 },
@@ -239,58 +389,58 @@ const styles = StyleSheet.create({
   welcomeText: { fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 0.5 },
   userName: { fontSize: 16, fontWeight: 'bold', color: '#0f172a' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
-  
   card: { backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', padding: 20, marginBottom: 16 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between' },
   label: { fontSize: 12, fontWeight: '700', color: '#64748b', letterSpacing: 0.5 },
-  value: { fontSize: 15, fontWeight: 'bold', color: '#0f172a', marginTop: 4 },
-  
   grid4: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   progressBox: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, paddingVertical: 12, marginHorizontal: 3 },
+  progressBoxActive: { borderColor: '#0d6efd', backgroundColor: '#eff6ff' },
+  progressBoxCompleted: { borderColor: '#bbf7d0', backgroundColor: '#f0fdf4' },
   progressTitle: { fontSize: 9, fontWeight: 'bold', color: '#64748b', marginTop: 8, marginBottom: 4 },
   progressTime: { fontSize: 13, fontWeight: '700', color: '#94a3b8' },
-  
   nextScanRow: { flexDirection: 'row', alignItems: 'center' },
   scanBadge: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fcd34d', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   scanBadgeText: { color: '#b45309', fontSize: 12, fontWeight: 'bold' },
   nextScanText: { color: '#64748b', fontSize: 13, marginLeft: 10 },
-
+  successBanner: { flexDirection: 'row', backgroundColor: '#dcfce7', padding: 12, borderRadius: 8, alignItems: 'center' },
+  successBannerText: { color: '#166534', fontSize: 14, marginLeft: 8, fontWeight: '600' },
   warningBanner: { flexDirection: 'row', backgroundColor: '#fef3c7', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 15 },
   warningText: { color: '#b45309', fontSize: 13, marginLeft: 8, flex: 1 },
-  
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   statBoxYellow: { flex: 0.48, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fcd34d', borderRadius: 12, padding: 15, alignItems: 'center' },
   statNumYellow: { fontSize: 24, fontWeight: '900', color: '#b45309' },
   statLabelYellow: { fontSize: 10, fontWeight: 'bold', color: '#d97706', marginTop: 4 },
-  
   statBoxRed: { flex: 0.48, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 12, padding: 15, alignItems: 'center' },
   statNumRed: { fontSize: 24, fontWeight: '900', color: '#b91c1c' },
   statLabelRed: { fontSize: 10, fontWeight: 'bold', color: '#dc2626', marginTop: 4 },
-  
   btnOutline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, paddingVertical: 12 },
   btnOutlineText: { color: '#475569', fontSize: 14, fontWeight: '600' },
-
-  // Estilos del acordeón
   detallesContainer: { marginTop: 10 },
   inasistenciaHeader: { flexDirection: 'row', alignItems: 'center', marginTop: 15, marginBottom: 10 },
   inasistenciaTitle: { color: '#b91c1c', fontSize: 13, fontWeight: 'bold', marginLeft: 6 },
   inasistenciaList: { backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 8, overflow: 'hidden' },
   inasistenciaRow: { flexDirection: 'row', alignItems: 'center', padding: 12 },
   inasistenciaRowBorder: { borderBottomWidth: 1, borderBottomColor: '#fecaca' },
+  retardoRowBorder: { borderBottomWidth: 1, borderBottomColor: '#fcd34d' },
   inasistenciaDate: { color: '#7f1d1d', fontSize: 14, fontWeight: '600' },
-
   bigScanBtn: { flexDirection: 'row', backgroundColor: '#1e293b', borderRadius: 12, paddingVertical: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 25 },
   bigScanBtnText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-
   recentHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingHorizontal: 5 },
   recentTitle: { fontSize: 16, fontWeight: 'bold', color: '#0f172a' },
   linkText: { fontSize: 14, color: '#0d6efd', fontWeight: '500' },
-
   jornadaRow: { flexDirection: 'row', alignItems: 'center', padding: 16 },
   jornadaBorder: { borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   jornadaIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#dcfce7', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   jornadaDate: { fontSize: 15, fontWeight: 'bold', color: '#0f172a' },
   jornadaTime: { fontSize: 13, color: '#64748b', marginTop: 2 },
   pillGreen: { backgroundColor: '#dcfce7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  pillGreenText: { color: '#16a34a', fontSize: 11, fontWeight: 'bold' }
+  pillGreenText: { color: '#16a34a', fontSize: 11, fontWeight: 'bold' },
+
+  // Estilos Home Office
+  homeOfficeCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f9ff', borderWidth: 1, borderColor: '#bae6fd', borderRadius: 16, padding: 16, marginBottom: 16 },
+  hoIconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center' },
+  hoTitle: { fontSize: 14, fontWeight: 'bold', color: '#0369a1' },
+  hoSubtitle: { fontSize: 12, color: '#0284c7', marginTop: 2, lineHeight: 17 },
+  btnHomeOfficeAction: { flexDirection: 'row', backgroundColor: '#e0f2fe', borderWidth: 1.5, borderColor: '#38bdf8', borderRadius: 12, paddingVertical: 15, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
+  btnHomeOfficeActionText: { color: '#0284c7', fontSize: 15, fontWeight: 'bold' }
 });

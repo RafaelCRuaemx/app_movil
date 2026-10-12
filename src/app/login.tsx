@@ -7,9 +7,7 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Ionicons } from '@expo/vector-icons';
-
-// Cambia esta IP si cambia tu red local
-const API_URL = 'http://192.168.100.9/UAEMex/wsl/Checador/backend/api';
+import { API_URL } from '../config/api';
 
 export default function LoginScreen() {
   const [correo, setCorreo] = useState('');
@@ -65,8 +63,9 @@ export default function LoginScreen() {
         const data = await response.json();
 
         if (data.success) {
+          await SecureStore.setItemAsync('userToken', 'active_session');
           await SecureStore.setItemAsync('userData', JSON.stringify(data.user));
-          router.replace('/(tab)');
+          router.replace('/scanner' as any);
         } else {
           Alert.alert('Aviso', data.message);
           await SecureStore.deleteItemAsync('deviceKey');
@@ -170,8 +169,9 @@ export default function LoginScreen() {
   };
 
   const finalizaLogin = async (user: any) => {
+    await SecureStore.setItemAsync('userToken', 'active_session');
     await SecureStore.setItemAsync('userData', JSON.stringify(user));
-    router.replace('/(tab)');
+    router.replace('/scanner' as any);
   };
 
   return (

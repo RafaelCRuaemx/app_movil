@@ -1,129 +1,526 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import * as SecureStore from 'expo-secure-store';
-const API_URL = 'http://192.168.100.9/UAEMex/wsl/Checador/backend/api';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { API_URL } from '../../config/api';
+
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const DIAS_SEMANA_COMPLETO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 export default function HistorialScreen() {
   const [historial, setHistorial] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mesActual, setMesActual] = useState(new Date().getMonth() + 1);
+  const [anioActual, setAnioActual] = useState(new Date().getFullYear());
+  const [diaSeleccionado, setDiaSeleccionado] = useState<number>(new Date().getDate());
+  const [mostrarListaCompleta, setMostrarListaCompleta] = useState(false);
+
+  const fetchHistorial = useCallback(async () => {
+    setLoading(true);
+    try {
+      const storedData = await SecureStore.getItemAsync('userData');
+      if (storedData) {
+        const user = JSON.parse(storedData);
+        const res = await fetch(`${API_URL}/historial_app.php`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usuario_id: user.id, mes: mesActual, anio: anioActual })
+        });
+        const json = await res.json();
+        if (json.success) {
+          setHistorial(json.historial || []);
+        }
+      }
+    } catch (e) {
+      console.log('Error fetching history:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, [mesActual, anioActual]);
 
   useEffect(() => {
-    const fetchHistorial = async () => {
-      try {
-        const storedData = await SecureStore.getItemAsync('userData');
-        if (storedData) {
-          const user = JSON.parse(storedData);
-          const res = await fetch(`${API_URL}/historial_app.php`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ usuario_id: user.id, limite: 30 })
-          });
-          const json = await res.json();
-          if (json.success) {
-            setHistorial(json.historial);
-          }
-        }
-      } catch (e) {
-        console.log('Error fetching history:', e);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchHistorial();
-  }, []);
+  }, [fetchHistorial]);
+
+  const irMesAnterior = () => {
+    if (mesActual === 1) {
+      setMesActual(12);
+      setAnioActual(a => a - 1);
+    } else {
+      setMesActual(m => m - 1);
+    }
+    setDiaSeleccionado(1);
+  };
+
+  const irMesSiguiente = () => {
+    const hoy = new Date();
+    if (anioActual === hoy.getFullYear() && mesActual === hoy.getMonth() + 1) return;
+    
+    if (mesActual === 12) {
+      setMesActual(1);
+      setAnioActual(a => a + 1);
+    } else {
+      setMesActual(m => m + 1);
+    }
+    setDiaSeleccionado(1);
+  };
+
+  // Mapeo indexado por número de día para acceso ultra-rápido O(1)
+  const mapaDias = useMemo(() => {
+    const mapa: Record<number, any> = {};
+    historial.forEach(r => {
+      if (r.fecha) {
+        const partes = r.fecha.split('-');
+        if (partes.length === 3) {
+          const diaNum = parseInt(partes[2], 10);
+          mapa[diaNum] = r;
+        }
+      }
+    });
+    return mapa;
+  }, [historial]);
+
+  // Función clasificadora para el semáforo
+  const clasificarEstado = (estadoRaw?: string): 'puntual' | 'retardo' | 'falta' | 'neutro' => {
+    if (!estadoRaw) return 'neutro';
+    const e = estadoRaw.toLowerCase().trim();
+    if (e === 'retardo') return 'retardo';
+    if (e === 'falta' || e === 'inasistencia') return 'falta';
+    if (['normal', 'puntual', 'correcto', 'asistencia', 'completo'].includes(e)) return 'puntual';
+    return 'puntual';
+  };
+
+  // Resumen del mes para los chips informativos
+  const resumen = useMemo(() => {
+    let puntuales = 0;
+    let retardos = 0;
+    let faltas = 0;
+    historial.forEach(h => {
+      const cat = clasificarEstado(h.estado);
+      if (cat === 'puntual') puntuales++;
+      else if (cat === 'retardo') retardos++;
+      else if (cat === 'falta') faltas++;
+    });
+    return { puntuales, retardos, faltas };
+  }, [historial]);
+
+  // Información del día seleccionado
+  const infoDiaSeleccionado = useMemo(() => {
+    const registro = mapaDias[diaSeleccionado];
+    const fechaObj = new Date(anioActual, mesActual - 1, diaSeleccionado);
+    const diaSemanaNum = fechaObj.getDay();
+    const esFinDeSemana = diaSemanaNum === 0 || diaSemanaNum === 6;
+    const esFuturo = fechaObj > new Date();
+
+    const nombreDia = DIAS_SEMANA_COMPLETO[diaSemanaNum];
+    const fechaTexto = `${nombreDia} ${diaSeleccionado} de ${MESES[mesActual - 1]}`;
+
+    if (registro) {
+      const categoria = clasificarEstado(registro.estado);
+      return {
+        existe: true,
+        categoria,
+        fechaTexto,
+        entrada: registro.entrada || '--:--',
+        comidaSalida: registro.comida_salida || '--:--',
+        comidaRegreso: registro.comida_regreso || '--:--',
+        salida: registro.salida || '--:--',
+        estado: registro.estado
+      };
+    }
+
+    return {
+      existe: false,
+      categoria: 'neutro' as const,
+      fechaTexto,
+      esFinDeSemana,
+      esFuturo
+    };
+  }, [diaSeleccionado, mapaDias, mesActual, anioActual]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* HEADER */}
       <View style={styles.header}>
-        {/* El botón de atrás es opcional en tabs, lo ponemos simulado o lo puedes envolver en TouchableOpacity */}
-        <Ionicons name="arrow-back" size={24} color="#0f172a" style={styles.backIcon} />
-        <Text style={styles.headerTitle}>Mi Historial de Asistencias</Text>
+        <Ionicons name="calendar-outline" size={24} color="#0f172a" style={{ marginRight: 12 }} />
+        <Text style={styles.headerTitle}>Calendario de Asistencias</Text>
       </View>
 
-      {loading && (
-        <View style={{ padding: 20, alignItems: 'center' }}>
-          <Text>Cargando historial...</Text>
-        </View>
-      )}
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.card}>
-          {historial.length > 0 ? (
-            historial.map((h: any, index: number) => (
-              <HistoryRow 
-                key={index} 
-                date={h.fecha_formateada} 
-                ent={h.entrada} 
-                sc={h.comida_salida} 
-                vc={h.comida_regreso} 
-                sal={h.salida} 
-                noBorder={index === historial.length - 1} 
-              />
-            ))
-          ) : (
-            <View style={{ padding: 20 }}><Text style={{ textAlign: 'center', color: '#64748b' }}>No hay historial disponible</Text></View>
-          )}
+        {/* NAVEGADOR DE MES */}
+        <View style={styles.monthSelectorCard}>
+          <TouchableOpacity onPress={irMesAnterior} style={styles.monthNavBtn}>
+            <Ionicons name="chevron-back" size={22} color="#0f172a" />
+          </TouchableOpacity>
+          
+          <View style={{ alignItems: 'center' }}>
+            <Text style={styles.monthTitle}>{MESES[mesActual - 1]} {anioActual}</Text>
+            <View style={styles.summaryChipsRow}>
+              <Text style={[styles.chipText, { color: '#16a34a' }]}>● {resumen.puntuales} Puntuales</Text>
+              <Text style={[styles.chipText, { color: '#d97706' }]}>● {resumen.retardos} Retardos</Text>
+              <Text style={[styles.chipText, { color: '#dc2626' }]}>● {resumen.faltas} Faltas</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity 
+            onPress={irMesSiguiente} 
+            style={[styles.monthNavBtn, (anioActual === new Date().getFullYear() && mesActual === new Date().getMonth() + 1) && { opacity: 0.25 }]}
+            disabled={anioActual === new Date().getFullYear() && mesActual === new Date().getMonth() + 1}
+          >
+            <Ionicons name="chevron-forward" size={22} color="#0f172a" />
+          </TouchableOpacity>
         </View>
+
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#0d6efd" />
+            <Text style={{ marginTop: 10, color: '#64748b', fontSize: 13 }}>Cargando registros...</Text>
+          </View>
+        ) : (
+          <>
+            {/* CUADRÍCULA DEL CALENDARIO PRINCIPAL */}
+            <View style={styles.calendarCard}>
+              <CalendarioGrid 
+                mes={mesActual} 
+                anio={anioActual} 
+                mapaDias={mapaDias}
+                diaSeleccionado={diaSeleccionado}
+                onSeleccionarDia={(d) => setDiaSeleccionado(d)}
+                clasificarEstado={clasificarEstado}
+              />
+
+              {/* SIMBOLOGÍA DEL SEMÁFORO */}
+              <View style={styles.legendContainer}>
+                <View style={styles.legendItem}>
+                  <View style={[styles.dot, { backgroundColor: '#16a34a' }]} />
+                  <Text style={styles.legendText}>Puntual</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.dot, { backgroundColor: '#d97706' }]} />
+                  <Text style={styles.legendText}>Retardo</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.dot, { backgroundColor: '#dc2626' }]} />
+                  <Text style={styles.legendText}>Falta</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.dot, { backgroundColor: '#cbd5e1' }]} />
+                  <Text style={styles.legendText}>No laboral</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* TARJETA DETALLE DEL DÍA SELECCIONADO */}
+            <View style={styles.detailCard}>
+              <View style={styles.detailHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.detailDate}>{infoDiaSeleccionado.fechaTexto}</Text>
+                  <Text style={styles.detailSub}>Detalle de la jornada</Text>
+                </View>
+
+                {infoDiaSeleccionado.existe ? (
+                  <View style={[
+                    styles.statusBadge, 
+                    infoDiaSeleccionado.categoria === 'puntual' && styles.statusBadgeGreen,
+                    infoDiaSeleccionado.categoria === 'retardo' && styles.statusBadgeYellow,
+                    infoDiaSeleccionado.categoria === 'falta' && styles.statusBadgeRed,
+                  ]}>
+                    <Text style={[
+                      styles.statusBadgeText,
+                      infoDiaSeleccionado.categoria === 'puntual' && { color: '#166534' },
+                      infoDiaSeleccionado.categoria === 'retardo' && { color: '#b45309' },
+                      infoDiaSeleccionado.categoria === 'falta' && { color: '#991b1b' },
+                    ]}>
+                      {infoDiaSeleccionado.categoria === 'puntual' ? '✓ Puntual' : 
+                       infoDiaSeleccionado.categoria === 'retardo' ? '⏰ Retardo' : '✕ Falta'}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={[styles.statusBadge, { backgroundColor: '#f1f5f9' }]}>
+                    <Text style={[styles.statusBadgeText, { color: '#64748b' }]}>
+                      {infoDiaSeleccionado.esFinDeSemana ? 'Fin de semana' : infoDiaSeleccionado.esFuturo ? 'Próximo' : 'Sin datos'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {infoDiaSeleccionado.existe && infoDiaSeleccionado.categoria !== 'falta' ? (
+                /* CUADRÍCULA DE 4 TIEMPOS DE ASISTENCIA */
+                <View style={styles.timesGrid}>
+                  <TimeBox 
+                    icon="sunny-outline" 
+                    title="Entrada" 
+                    time={infoDiaSeleccionado.entrada} 
+                    color="#0d6efd"
+                  />
+                  <TimeBox 
+                    icon="cafe-outline" 
+                    title="Sal. Comida" 
+                    time={infoDiaSeleccionado.comidaSalida} 
+                    color="#d97706"
+                  />
+                  <TimeBox 
+                    icon="fast-food-outline" 
+                    title="Reg. Comida" 
+                    time={infoDiaSeleccionado.comidaRegreso} 
+                    color="#059669"
+                  />
+                  <TimeBox 
+                    icon="exit-outline" 
+                    title="Salida" 
+                    time={infoDiaSeleccionado.salida} 
+                    color="#475569"
+                  />
+                </View>
+              ) : infoDiaSeleccionado.existe && infoDiaSeleccionado.categoria === 'falta' ? (
+                /* AVISO DE FALTA */
+                <View style={styles.faltaAlertBox}>
+                  <Ionicons name="alert-circle" size={24} color="#dc2626" style={{ marginRight: 10 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.faltaAlertTitle}>Falta por inasistencia</Text>
+                    <Text style={styles.faltaAlertDesc}>No se registró entrada ni salida en este día laboral.</Text>
+                  </View>
+                </View>
+              ) : (
+                /* DÍA NO LABORABLE O FUTURO */
+                <View style={styles.neutroAlertBox}>
+                  <Ionicons name="information-circle-outline" size={22} color="#64748b" style={{ marginRight: 8 }} />
+                  <Text style={styles.neutroAlertText}>
+                    {infoDiaSeleccionado.esFinDeSemana 
+                      ? 'Día de descanso semanal (Sábado / Domingo).' 
+                      : 'Este día no cuenta con registros requeridos.'}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* BOTÓN COLAPSABLE PARA VER TODAS LAS JORNADAS EN LISTA */}
+            <TouchableOpacity 
+              style={styles.toggleListBtn} 
+              onPress={() => setMostrarListaCompleta(!mostrarListaCompleta)}
+            >
+              <Text style={styles.toggleListBtnText}>
+                {mostrarListaCompleta ? 'Ocultar listado completo' : 'Ver todas las jornadas del mes (Lista)'}
+              </Text>
+              <Ionicons 
+                name={mostrarListaCompleta ? "chevron-up" : "chevron-down"} 
+                size={18} 
+                color="#0d6efd" 
+              />
+            </TouchableOpacity>
+
+            {mostrarListaCompleta && (
+              <View style={styles.fullListCard}>
+                {historial.map((h: any, idx: number) => {
+                  const cat = clasificarEstado(h.estado);
+                  const isFalta = cat === 'falta';
+                  const isRet = cat === 'retardo';
+
+                  return (
+                    <View 
+                      key={idx} 
+                      style={[styles.fullListRow, idx < historial.length - 1 && styles.fullListRowBorder]}
+                    >
+                      <View style={[
+                        styles.fullListDot, 
+                        { backgroundColor: isFalta ? '#dc2626' : isRet ? '#d97706' : '#16a34a' }
+                      ]} />
+                      
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.fullListDate}>{h.fecha_formateada}</Text>
+                        {!isFalta ? (
+                          <Text style={styles.fullListTimes}>
+                            Ent. {h.entrada} · Com. {h.comida_salida} · Reg. {h.comida_regreso} · Sal. {h.salida}
+                          </Text>
+                        ) : (
+                          <Text style={{ color: '#dc2626', fontSize: 12 }}>Sin asistencia</Text>
+                        )}
+                      </View>
+
+                      <View style={[
+                        styles.miniBadge, 
+                        { backgroundColor: isFalta ? '#fef2f2' : isRet ? '#fffbeb' : '#f0fdf4' }
+                      ]}>
+                        <Text style={[
+                          styles.miniBadgeText, 
+                          { color: isFalta ? '#dc2626' : isRet ? '#d97706' : '#16a34a' }
+                        ]}>
+                          {isFalta ? 'Falta' : isRet ? 'Retardo' : 'Puntual'}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            <View style={{ height: 40 }} />
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function HistoryRow({ date, ent, sc, vc, sal, noBorder }: { date: string, ent: string, sc: string, vc: string, sal: string, noBorder?: boolean }) {
-  return (
-    <View style={[styles.row, !noBorder && styles.rowBorder]}>
-      {/* Icono de check */}
-      <View style={styles.checkIconBox}>
-        <Ionicons name="checkmark" size={18} color="#16a34a" />
-      </View>
-      
-      {/* Contenido Central */}
-      <View style={styles.content}>
-        <Text style={styles.dateText}>{date}</Text>
-        <View style={styles.timesContainer}>
-          <TimeItem icon="log-in-outline" time={ent} />
-          <TimeItem icon="cafe-outline" time={sc} />
-          <TimeItem icon="return-down-back-outline" time={vc} />
-          <TimeItem icon="log-out-outline" time={sal} />
-        </View>
-      </View>
+// ── COMPONENTE CUADRÍCULA CALENDARIO CON SEMÁFORO ──
+function CalendarioGrid({ 
+  mes, anio, mapaDias, diaSeleccionado, onSeleccionarDia, clasificarEstado 
+}: { 
+  mes: number, 
+  anio: number, 
+  mapaDias: Record<number, any>, 
+  diaSeleccionado: number, 
+  onSeleccionarDia: (d: number) => void,
+  clasificarEstado: (e?: string) => 'puntual' | 'retardo' | 'falta' | 'neutro'
+}) {
+  const diasSemana = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+  const diasEnMes = new Date(anio, mes, 0).getDate();
+  const primerDiaSemana = new Date(anio, mes - 1, 1).getDay(); // 0 = Domingo
 
-      {/* Etiqueta Verde */}
-      <View style={styles.pillGreen}>
-        <Text style={styles.pillGreenText}>Completo</Text>
+  const celdas = [];
+  for (let i = 0; i < primerDiaSemana; i++) {
+    celdas.push(<View key={`empty-${i}`} style={styles.calCellEmpty} />);
+  }
+
+  for (let d = 1; d <= diasEnMes; d++) {
+    const registro = mapaDias[d];
+    const categoria = clasificarEstado(registro?.estado);
+    const estaSeleccionado = diaSeleccionado === d;
+
+    let bgColor = '#f8fafc';
+    let textColor = '#0f172a';
+    let dotColor = '#cbd5e1';
+
+    if (categoria === 'puntual') {
+      bgColor = '#dcfce7'; // Verde suave
+      textColor = '#166534';
+      dotColor = '#16a34a';
+    } else if (categoria === 'retardo') {
+      bgColor = '#fef3c7'; // Amarillo suave
+      textColor = '#b45309';
+      dotColor = '#d97706';
+    } else if (categoria === 'falta') {
+      bgColor = '#fee2e2'; // Rojo suave
+      textColor = '#991b1b';
+      dotColor = '#dc2626';
+    }
+
+    celdas.push(
+      <TouchableOpacity 
+        key={`day-${d}`} 
+        activeOpacity={0.7}
+        onPress={() => onSeleccionarDia(d)}
+        style={[
+          styles.calCell, 
+          { backgroundColor: bgColor },
+          estaSeleccionado && styles.calCellSelected
+        ]}
+      >
+        <Text style={[
+          styles.calCellText, 
+          { color: textColor },
+          estaSeleccionado && { fontWeight: '900' }
+        ]}>
+          {d}
+        </Text>
+        
+        {/* Bolita del semáforo */}
+        <View style={[styles.semaforoMiniDot, { backgroundColor: dotColor }]} />
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View style={styles.calWrapper}>
+      <View style={styles.calWeekRow}>
+        {diasSemana.map((dia, idx) => (
+          <Text key={idx} style={[styles.calWeekHeader, (idx === 0 || idx === 6) && { color: '#cbd5e1' }]}>
+            {dia}
+          </Text>
+        ))}
+      </View>
+      <View style={styles.calDaysGrid}>
+        {celdas}
       </View>
     </View>
   );
 }
 
-function TimeItem({ icon, time }: { icon: any, time: string }) {
+// ── COMPONENTE DE CAJITA DE TIEMPO ──
+function TimeBox({ icon, title, time, color }: { icon: any, title: string, time: string, color: string }) {
+  const isFilled = time && time !== '--:--';
   return (
-    <View style={styles.timeItem}>
-      <Ionicons name={icon} size={14} color="#0d6efd" style={{ marginRight: 2 }} />
-      <Text style={styles.timeText}>{time}</Text>
+    <View style={styles.timeBox}>
+      <Ionicons name={icon} size={18} color={isFilled ? color : '#94a3b8'} style={{ marginBottom: 4 }} />
+      <Text style={styles.timeBoxTitle}>{title}</Text>
+      <Text style={[styles.timeBoxTime, isFilled && { color: '#0f172a' }]}>{time}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#ffffff' },
-  header: { flexDirection: 'row', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  backIcon: { marginRight: 15 },
+  safeArea: { flex: 1, backgroundColor: '#f8fafc' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a' },
-  container: { flex: 1, padding: 16, backgroundColor: '#f8fafc' },
   
-  card: { backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 40 },
-  row: { flexDirection: 'row', alignItems: 'center', padding: 16 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  container: { flex: 1, padding: 16 },
+
+  monthSelectorCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
+  monthNavBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center' },
+  monthTitle: { fontSize: 16, fontWeight: 'bold', color: '#0f172a' },
+  summaryChipsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  chipText: { fontSize: 11, fontWeight: '700' },
+
+  loadingContainer: { padding: 40, alignItems: 'center' },
+
+  calendarCard: { backgroundColor: '#ffffff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
+  calWrapper: { marginBottom: 10 },
+  calWeekRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  calWeekHeader: { width: '14.28%', textAlign: 'center', fontWeight: 'bold', color: '#64748b', fontSize: 12 },
+  calDaysGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  calCellEmpty: { width: '14.28%', aspectRatio: 1 },
+  calCell: { width: '13%', margin: '0.64%', aspectRatio: 1, justifyContent: 'center', alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: 'transparent' },
+  calCellSelected: { borderColor: '#0d6efd', borderWidth: 2, transform: [{ scale: 1.05 }] },
+  calCellText: { fontSize: 13, fontWeight: '700' },
+  semaforoMiniDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 3 },
+
+  legendContainer: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#f8fafc', paddingVertical: 10, borderRadius: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+  legendItem: { flexDirection: 'row', alignItems: 'center' },
+  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 5 },
+  legendText: { fontSize: 11, color: '#64748b', fontWeight: '600' },
+
+  detailCard: { backgroundColor: '#ffffff', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
+  detailHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  detailDate: { fontSize: 16, fontWeight: 'bold', color: '#0f172a' },
+  detailSub: { fontSize: 12, color: '#64748b', marginTop: 2 },
   
-  checkIconBox: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#dcfce7', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
-  
-  content: { flex: 1 },
-  dateText: { fontSize: 16, fontWeight: 'bold', color: '#0f172a', marginBottom: 6 },
-  
-  timesContainer: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  timeItem: { flexDirection: 'row', alignItems: 'center' },
-  timeText: { fontSize: 13, color: '#64748b' },
-  
-  pillGreen: { backgroundColor: '#dcfce7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginLeft: 10 },
-  pillGreenText: { color: '#16a34a', fontSize: 11, fontWeight: 'bold' }
+  statusBadge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
+  statusBadgeGreen: { backgroundColor: '#dcfce7' },
+  statusBadgeYellow: { backgroundColor: '#fef3c7' },
+  statusBadgeRed: { backgroundColor: '#fee2e2' },
+  statusBadgeText: { fontSize: 12, fontWeight: 'bold' },
+
+  timesGrid: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  timeBox: { flex: 1, alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 12, paddingVertical: 12, borderWidth: 1, borderColor: '#e2e8f0' },
+  timeBoxTitle: { fontSize: 10, color: '#64748b', fontWeight: 'bold', marginBottom: 4 },
+  timeBoxTime: { fontSize: 13, fontWeight: 'bold', color: '#94a3b8' },
+
+  faltaAlertBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 12, padding: 14 },
+  faltaAlertTitle: { fontSize: 14, fontWeight: 'bold', color: '#991b1b', marginBottom: 2 },
+  faltaAlertDesc: { fontSize: 12, color: '#b91c1c' },
+
+  neutroAlertBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 14 },
+  neutroAlertText: { fontSize: 13, color: '#64748b', flex: 1 },
+
+  toggleListBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#bfdbfe', borderRadius: 12, paddingVertical: 14, marginBottom: 16 },
+  toggleListBtnText: { color: '#0d6efd', fontSize: 14, fontWeight: 'bold', marginRight: 6 },
+
+  fullListCard: { backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', paddingHorizontal: 16 },
+  fullListRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  fullListRowBorder: { borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  fullListDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
+  fullListDate: { fontSize: 14, fontWeight: 'bold', color: '#0f172a' },
+  fullListTimes: { fontSize: 12, color: '#64748b', marginTop: 2 },
+  miniBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  miniBadgeText: { fontSize: 11, fontWeight: 'bold' }
 });

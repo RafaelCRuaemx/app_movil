@@ -1,215 +1,404 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Animated, Easing, ActivityIndicator, Alert } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
+import { router, useFocusEffect } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-const API_URL = 'http://192.168.100.9/UAEMex/wsl/Checador/backend/api';
+import { API_URL } from '../config/api';
+const BARCODE_SETTINGS = { barcodeTypes: ['qr' as const] };
 
+interface PreflightDetails {
+  es_home_office: boolean;
+  oficina_nombre?: string;
+  radio_permitido?: number;
+  distancia_metros?: number | null;
+  red_autorizada?: boolean;
+  geocerca_autorizada?: boolean;
+}
 
 export default function ScannerScreen() {
-  const [userData, setUserData] = useState<any>(null);
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [locationError, setLocationError] = useState<string | null>(null);
+  const [isFocused, setIsFocused] = useState(true);
 
-  useEffect(() => {
-    const loadUser = async () => {
-      const stored = await SecureStore.getItemAsync('userData');
-      if (stored) setUserData(JSON.parse(stored));
-    };
-    loadUser();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => {
+        setIsFocused(false);
+      };
+    }, [])
+  );
+
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
+  const [validatingPreflight, setValidatingPreflight] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [userData, setUserData] = useState<any>(null);
 
-  // Valor animado para la línea láser del escáner
-  const scanLineAnim = useRef(new Animated.Value(0)).current;
+  // Estados de Pre-vuelo
+  const [preflightData, setPreflightData] = useState<PreflightDetails | null>(null);
+  const [preflightFailedModal, setPreflightFailedModal] = useState(false);
+  const [preflightErrors, setPreflightErrors] = useState<string[]>([]);
+  const [isHomeOffice, setIsHomeOffice] = useState(false);
 
-  // Efecto que controla la animación de la línea
+  // Modal de resultado de escaneo
+  const [resultModalVisible, setResultModalVisible] = useState(false);
+  const [modalType, setModalType] = useState<'success' | 'error'>('success');
+  const [modalMessage, setModalMessage] = useState('');
+  const [modalContext, setModalContext] = useState(''); 
+
+  // 1. Cargar usuario y ejecutar automáticamente la validación de entorno
   useEffect(() => {
-    if (cameraActive && permission?.granted && !scanned) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(scanLineAnim, {
-            toValue: 295, // Baja hasta el fondo de la caja
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(scanLineAnim, {
-            toValue: 0, // Sube de regreso
-            duration: 1500,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          })
-        ])
-      ).start();
-    } else {
-      scanLineAnim.stopAnimation();
-      scanLineAnim.setValue(0);
-    }
-  }, [cameraActive, permission, scanned]);
+    const initScanner = async () => {
+      const stored = await SecureStore.getItemAsync('userData');
+      if (stored) {
+        const parsedUser = JSON.parse(stored);
+        setUserData(parsedUser);
+        //  Dispara la validación de Wi-Fi, GPS y apertura de cámara en automático
+        validarYIniciarCamara(parsedUser);
+      }
+    };
+    initScanner();
+  }, []);
 
-  const handleBarCodeScanned = async ({ type, data }: { type: string, data: string }) => {
-    setScanned(true);
-    setLoading(true);
+  // Validación de Pre-Vuelo antes de encender la cámara
+  const validarYIniciarCamara = async (userParam?: any) => {
+    const user = userParam || userData;
+    if (!user?.id) {
+      Alert.alert('Error', 'No se encontró la sesión de usuario activa.');
+      return;
+    }
+
+    setValidatingPreflight(true);
+    setLocationError(null);
 
     try {
-      const userId = userData?.id;
-      if (!userId) {
-        Alert.alert("Error", "No se encontró el ID del usuario.");
-        setLoading(false);
+      // 1. Solicitar y obtener ubicación GPS con precisión
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setValidatingPreflight(false);
+        setLocationError('Permiso de ubicación GPS denegado.');
+        Alert.alert(
+          'Ubicación requerida',
+          'Es indispensable otorgar permiso de ubicación para verificar que estás dentro del rango de la oficina antes de abrir la cámara.'
+        );
         return;
       }
 
-      const postData = {
-        usuario_id: userId,
-        qr: data,
-        lat: location?.coords.latitude || null,
-        lon: location?.coords.longitude || null,
-        gps_acc: location?.coords.accuracy || null
-      };
+      let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setLocation(loc);
+
+      // 2. Ejecutar validación de pre-vuelo con el backend
+      const res = await fetch(`${API_URL}/validar_prevuelo_app.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usuario_id: user.id,
+          lat: loc.coords.latitude,
+          lon: loc.coords.longitude
+        })
+      });
+
+      const responseText = await res.text();
+      let preflightRes: any;
+      try {
+        preflightRes = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error('Respuesta inválida del servidor: ' + responseText.substring(0, 80));
+      }
+
+      if (preflightRes.es_home_office) {
+        setIsHomeOffice(true);
+      }
+
+      // Si no se autoriza el escaneo (por red Wi-Fi o geocerca)
+      if (!preflightRes.permitir_escanear) {
+        setValidatingPreflight(false);
+        setCameraActive(false);
+        setPreflightErrors(preflightRes.errores || [preflightRes.message || 'No cumples con las condiciones para escanear.']);
+        setPreflightData(preflightRes.detalles || null);
+        setPreflightFailedModal(true);
+        return;
+      }
+
+      // 3. Si las validaciones fueron exitosas, verificar permisos de cámara y activar
+      setPreflightData(preflightRes.detalles || null);
+
+      if (!permission?.granted) {
+        const { status: camStatus } = await requestPermission();
+        if (camStatus !== 'granted') {
+          setValidatingPreflight(false);
+          Alert.alert('Aviso', 'Se requieren permisos de cámara para poder escanear el QR.');
+          return;
+        }
+      }
+
+      setValidatingPreflight(false);
+      setCameraActive(true);
+      setScanned(false);
+
+    } catch (error: any) {
+      setValidatingPreflight(false);
+      Alert.alert('Error de conexión', 'No se pudo validar el estado de red y geocerca: ' + error.message);
+    }
+  };
+
+  // Registro directo en modalidad Home Office sin necesidad de QR físico
+  const registrarHomeOfficeDirecto = async () => {
+    if (!userData?.id) return;
+    setLoading(true);
+
+    let currentLocation = location;
+    if (!currentLocation) {
+      try {
+        currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setLocation(currentLocation);
+      } catch (e) {}
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/registrar_asistencia_home_office_app.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usuario_id: userData.id,
+          lat: currentLocation?.coords.latitude,
+          lon: currentLocation?.coords.longitude,
+          gps_acc: currentLocation?.coords.accuracy
+        })
+      });
+
+      const json = await res.json();
+      setLoading(false);
+
+      if (json.success) {
+        setModalType('success');
+        let tipo = json.tipo || 'asistencia';
+        let context = 'Registro Home Office Exitoso';
+        if (tipo === 'entrada') context = '¡Excelente inicio de jornada remota!';
+        else if (tipo === 'comidaSalida') context = '¡Buen provecho, disfruta tu descanso!';
+        else if (tipo === 'comidaEntrada') context = '¡Bienvenido de vuelta a tus labores!';
+        else if (tipo === 'salida') context = 'Jornada remota finalizada. ¡Buen descanso!';
+
+        setModalContext(context);
+        setModalMessage(`Registrado correctamente a las ${json.registro?.hora || ''} en modalidad Home Office.`);
+        setResultModalVisible(true);
+      } else {
+        setModalType('error');
+        setModalMessage(json.motivo || json.message || 'No fue posible registrar asistencia remota.');
+        setResultModalVisible(true);
+      }
+    } catch (e: any) {
+      setLoading(false);
+      setModalType('error');
+      setModalMessage('Error de red: ' + e.message);
+      setResultModalVisible(true);
+    }
+  };
+
+  const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
+    if (scanned || loading) return;
+    setScanned(true);
+    setLoading(true);
+
+    let currentLocation = location;
+    if (!currentLocation) {
+      try {
+        currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setLocation(currentLocation);
+      } catch (e) {}
+    }
+
+    if (!currentLocation) {
+      setLoading(false);
+      setModalType('error');
+      setModalMessage('Aún no hemos obtenido tu ubicación GPS. Por favor reintenta.');
+      setResultModalVisible(true);
+      return;
+    }
+
+    try {
+      const cleanData = (data || '').trim();
+      let qrPayload: any;
+      try {
+        qrPayload = JSON.parse(cleanData);
+      } catch (e) {
+        setLoading(false);
+        setModalType('error');
+        setModalMessage(`El código QR no es válido para este sistema.\nLeído: ${cleanData}`);
+        setResultModalVisible(true);
+        return;
+      }
+
+      let o = qrPayload.o !== undefined ? qrPayload.o : qrPayload.oficina_id;
+      let t = qrPayload.t !== undefined ? qrPayload.t : qrPayload.totp;
+
+      if (o === undefined || !t) {
+        setLoading(false);
+        setModalType('error');
+        setModalMessage(`QR incompleto o no reconocido.\nContenido: ${cleanData}`);
+        setResultModalVisible(true);
+        return;
+      }
 
       const res = await fetch(`${API_URL}/registrar_asistencia_app.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(postData)
+        body: JSON.stringify({
+          usuario_id: userData?.id,
+          qr: cleanData,
+          qr_payload: cleanData,
+          lat: currentLocation.coords.latitude,
+          latitud: currentLocation.coords.latitude,
+          lon: currentLocation.coords.longitude,
+          longitud: currentLocation.coords.longitude,
+          gps_acc: currentLocation.coords.accuracy
+        })
       });
-      
-      const json = await res.json();
-      
-      if (json.success) {
-        Alert.alert("Éxito", json.message || "Asistencia registrada correctamente.", [
-          { text: "OK", onPress: () => router.replace('/(tab)/index' as any) }
-        ]);
-      } else {
-        Alert.alert("Atención", json.motivo || json.message || "No se pudo registrar la asistencia.", [
-          { text: "Reintentar", onPress: () => setScanned(false) }
-        ]);
+
+      const responseText = await res.text();
+      let json;
+      try {
+        json = JSON.parse(responseText);
+      } catch(e) {
+        throw new Error('Respuesta del servidor no es JSON válido: ' + responseText.substring(0, 100));
       }
 
-    } catch (e) {
-      console.error(e);
-      Alert.alert("Error", "Ocurrió un problema de red.");
-      setScanned(false);
-    } finally {
       setLoading(false);
+
+      if (json.success) {
+        setModalType('success');
+        let msg = json.message || 'Asistencia registrada con éxito.';
+        let context = 'Registro exitoso';
+
+        if (msg.toLowerCase().includes('entrada')) context = '¡Excelente inicio de jornada!';
+        else if (msg.toLowerCase().includes('comer') || msg.toLowerCase().includes('comida')) context = '¡Buen provecho, disfruta tu descanso!';
+        else if (msg.toLowerCase().includes('salida')) context = 'Jornada finalizada. ¡Buen descanso!';
+        
+        setModalMessage(msg);
+        setModalContext(context);
+        setResultModalVisible(true);
+      } else {
+        setModalType('error');
+        setModalMessage(json.motivo || json.message || 'Ocurrió un error al registrar.');
+        setResultModalVisible(true);
+      }
+
+    } catch (e: any) {
+      setLoading(false);
+      setModalType('error');
+      setModalMessage('No se pudo conectar con el servidor: ' + e.message);
+      setResultModalVisible(true);
     }
   };
 
-  const iniciarCamara = async () => {
-    if (!permission?.granted) {
-      await requestPermission();
-    }
-    
-    // Encendemos la cámara inmediatamente para no hacer esperar al usuario
-    setCameraActive(true);
-    setScanned(false);
+  const closeSuccess = () => {
+    setResultModalVisible(false);
+    router.replace('/(tab)/' as any);
+  };
 
-    // Solicitamos la ubicación sin bloquear la UI
-    (async () => {
-      try {
-        let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          setLocationError("Permiso de ubicación denegado.");
-        } else {
-          // Usamos Balanced para que sea rápido y no se quede colgado buscando satélites
-          let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          setLocation(loc);
-          setLocationError(null);
-        }
-      } catch (e) {
-        console.log("Error de ubicación", e);
-      }
-    })();
+  const retryScan = () => {
+    setResultModalVisible(false);
+    setScanned(false);
+    setCameraActive(true);
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* HEADER */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/(tab)/' as any)} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#0f172a" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Escanear QR</Text>
+        <Text style={styles.headerTitle}>Escanear Asistencia</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <View style={styles.container}>
-        
-        {/* OFICINA ASIGNADA */}
+      <ScrollView contentContainerStyle={styles.container} bounces={false}>
         <View style={styles.officeBox}>
           <Ionicons name="business-outline" size={18} color="#475569" style={{ marginRight: 8 }} />
-          <Text style={styles.officeTextNormal}>Oficina asignada: </Text>
+          <Text style={styles.officeTextNormal}>Oficina: </Text>
           <Text style={styles.officeTextBold}>{userData?.oficina_nombre || "Tu Oficina"}</Text>
         </View>
 
+        {isHomeOffice && (
+          <View style={styles.hoBanner}>
+            <Ionicons name="home" size={20} color="#0369a1" />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={styles.hoBannerTitle}>Modalidad Home Office Activa</Text>
+              <Text style={styles.hoBannerText}>
+                No requieres estar en la red ni geocerca de la oficina.
+              </Text>
+            </View>
+          </View>
+        )}
+
         <Text style={styles.instructionText}>
-          Alinea el código QR de la oficina dentro del marco de lectura.
+          {cameraActive 
+            ? 'Alinea el código QR de la oficina dentro del marco de lectura.'
+            : 'Se validará tu conexión a la red de la oficina y tu ubicación GPS antes de activar la cámara.'}
         </Text>
 
-        {/* MARCO DE LA CÁMARA */}
         <View style={styles.cameraWrapper}>
           <View style={[styles.corner, styles.cornerTL]} />
           <View style={[styles.corner, styles.cornerTR]} />
           <View style={[styles.corner, styles.cornerBL]} />
           <View style={[styles.corner, styles.cornerBR]} />
 
-          {(!cameraActive || !permission?.granted) ? (
-            <View style={styles.cameraPlaceholder}>
-              <Ionicons name="videocam-outline" size={48} color="#cbd5e1" />
-              <Text style={styles.cameraPlaceholderTitle}>Activa la cámara para comenzar</Text>
-              <Text style={styles.cameraPlaceholderText}>Apunta al QR y mantenlo dentro del cuadro</Text>
-            </View>
+          {!cameraActive ? (
+             <View style={styles.cameraPlaceholder}>
+               {validatingPreflight ? (
+                 <>
+                   <ActivityIndicator size="large" color="#0d6efd" />
+                   <Text style={[styles.cameraPlaceholderTitle, { color: '#0d6efd' }]}>Validando requisitos...</Text>
+                   <Text style={styles.cameraPlaceholderText}>Comprobando red Wi-Fi y distancia GPS...</Text>
+                 </>
+               ) : (
+                 <>
+                   <Ionicons name="shield-checkmark-outline" size={48} color="#cbd5e1" />
+                   <Text style={styles.cameraPlaceholderTitle}>Validación previa requerida</Text>
+                   <Text style={styles.cameraPlaceholderText}>Presiona el botón para comprobar Wi-Fi y ubicación</Text>
+                 </>
+               )}
+             </View>
           ) : (
             <View style={styles.cameraInner}>
-              <CameraView 
-                style={StyleSheet.absoluteFill} 
-                facing="back"
-                barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-              />
-              
-              {/* LÍNEA LÁSER ANIMADA */}
-              {!scanned && (
-                <View style={StyleSheet.absoluteFill}>
-                  <Animated.View 
-                    style={[
-                      styles.scanLine, 
-                      { transform: [{ translateY: scanLineAnim }] }
-                    ]} 
-                  />
-                </View>
+              {isFocused && (
+                <CameraView 
+                  style={StyleSheet.absoluteFill} 
+                  facing="back"
+                  barcodeScannerSettings={BARCODE_SETTINGS}
+                  onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+                />
               )}
 
               {scanned && (
                 <View style={styles.scannedOverlay}>
-                  {loading ? (
-                    <>
-                      <ActivityIndicator size="large" color="#0d6efd" />
-                      <Text style={{ marginTop: 10, fontWeight: 'bold', color: '#0d6efd' }}>Procesando...</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Ionicons name="checkmark-circle" size={60} color="#16a34a" />
-                      <Text style={{ marginTop: 10, fontWeight: 'bold', color: '#16a34a' }}>¡Escaneado!</Text>
-                    </>
-                  )}
+                  <ActivityIndicator size="large" color="#0d6efd" />
+                  <Text style={{ marginTop: 10, fontWeight: 'bold', color: '#0d6efd' }}>Procesando lectura...</Text>
                 </View>
               )}
             </View>
           )}
         </View>
 
-        {/* BOTÓN ACTIVAR CÁMARA O RE-ESCANEAR */}
-        {(!cameraActive || !permission?.granted) ? (
-          <TouchableOpacity style={styles.btnOutline} onPress={iniciarCamara}>
-            <Ionicons name="videocam" size={20} color="#0d6efd" style={{ marginRight: 8 }} />
-            <Text style={styles.btnOutlineText}>Activar cámara</Text>
+        {!cameraActive ? (
+          <TouchableOpacity 
+            style={[styles.btnPrimary, validatingPreflight && { opacity: 0.7 }]} 
+            onPress={() => validarYIniciarCamara()}
+            disabled={validatingPreflight}
+          >
+            {validatingPreflight ? (
+              <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+            ) : (
+              <Ionicons name="videocam" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+            )}
+            <Text style={styles.btnPrimaryText}>
+              {validatingPreflight ? 'Verificando entorno...' : 'Validar y activar cámara'}
+            </Text>
           </TouchableOpacity>
         ) : scanned ? (
           <TouchableOpacity style={styles.btnOutline} onPress={() => setScanned(false)}>
@@ -217,23 +406,139 @@ export default function ScannerScreen() {
             <Text style={styles.btnOutlineText}>Escanear de nuevo</Text>
           </TouchableOpacity>
         ) : (
-          <View style={styles.btnPlaceholder} />
+          <TouchableOpacity style={styles.btnOutline} onPress={() => setCameraActive(false)}>
+            <Ionicons name="stop-circle-outline" size={20} color="#64748b" style={{ marginRight: 8 }} />
+            <Text style={[styles.btnOutlineText, { color: '#64748b' }]}>Detener cámara</Text>
+          </TouchableOpacity>
         )}
 
-        {/* TEXTO INFERIOR */}
+        {isHomeOffice && (
+          <TouchableOpacity 
+            style={styles.btnHomeOffice} 
+            onPress={registrarHomeOfficeDirecto}
+            disabled={loading}
+          >
+            <Ionicons name="home-outline" size={18} color="#0284c7" style={{ marginRight: 8 }} />
+            <Text style={styles.btnHomeOfficeText}>Registrar asistencia Home Office (Sin QR)</Text>
+          </TouchableOpacity>
+        )}
+
         {locationError ? (
           <Text style={[styles.footerText, { color: '#dc2626' }]}>{locationError}</Text>
         ) : location ? (
           <Text style={[styles.footerText, { color: '#16a34a' }]}>
-            Ubicación obtenida ({location.coords.accuracy?.toFixed(0)}m de precisión)
+            GPS Activo ({location.coords.accuracy?.toFixed(0)}m de precisión)
           </Text>
-        ) : cameraActive ? (
-          <Text style={styles.footerText}>Obteniendo ubicación...</Text>
         ) : (
-          <Text style={styles.footerText}>La ubicación se obtendrá al activar la cámara.</Text>
+          <Text style={styles.footerText}>Conéctate a la red Wi-Fi de la oficina y mantén tu GPS encendido</Text>
         )}
-        
-      </View>
+      </ScrollView>
+
+      {/* MODAL DE FALLA EN PRE-VUELO (RED O GEOCERCA NO CUMPLIDAS) */}
+      <Modal visible={preflightFailedModal} animationType="fade" transparent={true}>
+        <View style={styles.backdropModal}>
+          <View style={styles.diagnosticCard}>
+            <View style={styles.diagnosticIconWrap}>
+              <Ionicons name="alert-circle" size={44} color="#dc2626" />
+            </View>
+            <Text style={styles.diagnosticTitle}>Validación no superada</Text>
+            <Text style={styles.diagnosticSubtitle}>
+              No es posible abrir la cámara para checar debido a que no cumples los requisitos de seguridad:
+            </Text>
+
+            <View style={styles.diagnosticList}>
+              {/* DIAGNÓSTICO RED WI-FI */}
+              <View style={styles.diagnosticItem}>
+                <Ionicons 
+                  name={preflightData?.red_autorizada === false ? "close-circle" : "checkmark-circle"} 
+                  size={22} 
+                  color={preflightData?.red_autorizada === false ? "#dc2626" : "#16a34a"} 
+                />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.diagnosticItemTitle}>Red Wi-Fi de la Oficina</Text>
+                  <Text style={styles.diagnosticItemDesc}>
+                    {preflightData?.red_autorizada === false 
+                      ? 'No estás conectado a la red Wi-Fi corporativa registrada.' 
+                      : 'Conectado a la red de la oficina.'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* DIAGNÓSTICO GEOCERCA */}
+              <View style={styles.diagnosticItem}>
+                <Ionicons 
+                  name={preflightData?.geocerca_autorizada === false ? "close-circle" : "checkmark-circle"} 
+                  size={22} 
+                  color={preflightData?.geocerca_autorizada === false ? "#dc2626" : "#16a34a"} 
+                />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.diagnosticItemTitle}>Ubicación y Rango de Oficina</Text>
+                  <Text style={styles.diagnosticItemDesc}>
+                    {preflightData?.geocerca_autorizada === false
+                      ? `Estás a ${preflightData.distancia_metros ?? '?'}m de la oficina. El rango máximo permitido es de ${preflightData.radio_permitido ?? 100}m.`
+                      : 'Dentro del radio permitido.'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.btnRetryModal} 
+              onPress={() => {
+                setPreflightFailedModal(false);
+                validarYIniciarCamara();
+              }}
+            >
+              <Ionicons name="reload" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.btnRetryModalText}>Reintentar comprobación</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.btnCancelModal} 
+              onPress={() => {
+                setPreflightFailedModal(false);
+                router.back();
+              }}
+            >
+              <Text style={styles.btnCancelModalText}>Volver al menú principal</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL DE RESULTADO DE REGISTRO */}
+      <Modal visible={resultModalVisible} animationType="slide" transparent={false}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: modalType === 'success' ? '#f0fdf4' : '#fef2f2' }}>
+          <View style={styles.modalContainer}>
+            {modalType === 'success' ? (
+              <Ionicons name="checkmark-circle" size={100} color="#16a34a" />
+            ) : (
+              <Ionicons name="close-circle" size={100} color="#dc2626" />
+            )}
+            
+            <Text style={[styles.modalTitle, { color: modalType === 'success' ? '#166534' : '#991b1b' }]}>
+              {modalType === 'success' ? modalContext : 'Error'}
+            </Text>
+            
+            <Text style={styles.modalMessage}>{modalMessage}</Text>
+            
+            {modalType === 'success' ? (
+              <TouchableOpacity style={[styles.modalButton, { backgroundColor: '#16a34a' }]} onPress={closeSuccess}>
+                <Text style={styles.modalButtonText}>Aceptar y volver al inicio</Text>
+              </TouchableOpacity>
+            ) : (
+              <>
+                <TouchableOpacity style={[styles.modalButton, { backgroundColor: '#dc2626', marginBottom: 15 }]} onPress={retryScan}>
+                  <Text style={styles.modalButtonText}>Reintentar escaneo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.btnOutlineModal, { width: 250 }]} onPress={closeSuccess}>
+                  <Text style={styles.btnOutlineTextModal}>Volver al inicio</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -243,20 +548,23 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', justifyContent: 'space-between' },
   backButton: { padding: 5, marginLeft: -5 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a' },
-  container: { flex: 1, alignItems: 'center', padding: 20, backgroundColor: '#ffffff' },
-  
-  officeBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, paddingVertical: 12, paddingHorizontal: 20, marginBottom: 20 },
+  container: { alignItems: 'center', padding: 20, backgroundColor: '#ffffff' },
+  officeBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16, marginBottom: 15 },
   officeTextNormal: { fontSize: 14, color: '#475569' },
   officeTextBold: { fontSize: 14, fontWeight: 'bold', color: '#0d6efd' },
-  instructionText: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 30, paddingHorizontal: 10 },
   
-  cameraWrapper: { width: 330, height: 330, position: 'relative', marginBottom: 30 },
+  hoBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f9ff', borderWidth: 1, borderColor: '#bae6fd', borderRadius: 10, padding: 12, marginBottom: 15, width: '100%' },
+  hoBannerTitle: { fontSize: 14, fontWeight: 'bold', color: '#0369a1' },
+  hoBannerText: { fontSize: 12, color: '#0284c7', marginTop: 2 },
+
+  instructionText: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 20, paddingHorizontal: 10, lineHeight: 20 },
+  
+  cameraWrapper: { width: 330, height: 330, position: 'relative', marginBottom: 25 },
   cameraInner: { flex: 1, margin: 15 },
   cameraPlaceholder: { flex: 1, borderRadius: 20, margin: 15, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  cameraPlaceholderTitle: { color: '#94a3b8', marginTop: 15, fontSize: 14, fontWeight: 'bold', textAlign: 'center' },
-  cameraPlaceholderText: { color: '#cbd5e1', marginTop: 5, fontSize: 12, textAlign: 'center' },
+  cameraPlaceholderTitle: { color: '#64748b', marginTop: 15, fontSize: 15, fontWeight: 'bold', textAlign: 'center' },
+  cameraPlaceholderText: { color: '#94a3b8', marginTop: 6, fontSize: 12, textAlign: 'center', lineHeight: 18 },
   
-  scanLine: { width: '100%', height: 3, backgroundColor: '#0d6efd', shadowColor: '#0d6efd', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 10, elevation: 5 },
   scannedOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.9)', justifyContent: 'center', alignItems: 'center' },
   
   corner: { position: 'absolute', width: 40, height: 40, borderColor: '#0d6efd' },
@@ -264,10 +572,39 @@ const styles = StyleSheet.create({
   cornerTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 20 },
   cornerBL: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 20 },
   cornerBR: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 20 },
-
-  btnOutline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#0d6efd', borderRadius: 8, paddingVertical: 14, marginBottom: 20 },
-  btnOutlineText: { color: '#0d6efd', fontSize: 16, fontWeight: '600' },
-  btnPlaceholder: { height: 50, marginBottom: 20 }, 
   
-  footerText: { fontSize: 13, color: '#94a3b8', textAlign: 'center' }
+  footerText: { fontSize: 13, color: '#94a3b8', textAlign: 'center', marginTop: 15 },
+  
+  btnPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#0d6efd', borderRadius: 12, paddingVertical: 14, marginBottom: 12 },
+  btnPrimaryText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+
+  btnOutline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#0d6efd', borderRadius: 12, paddingVertical: 14, marginBottom: 12 },
+  btnOutlineText: { color: '#0d6efd', fontSize: 16, fontWeight: '600' },
+
+  btnHomeOffice: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#e0f2fe', borderWidth: 1, borderColor: '#7dd3fc', borderRadius: 12, paddingVertical: 13, marginBottom: 10 },
+  btnHomeOfficeText: { color: '#0369a1', fontSize: 14, fontWeight: 'bold' },
+
+  // Modal Diagnóstico de Pre-vuelo
+  backdropModal: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  diagnosticCard: { backgroundColor: '#ffffff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 360, alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
+  diagnosticIconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fef2f2', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
+  diagnosticTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a', textAlign: 'center', marginBottom: 8 },
+  diagnosticSubtitle: { fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 20, lineHeight: 18 },
+  diagnosticList: { width: '100%', backgroundColor: '#f8fafc', borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#f1f5f9' },
+  diagnosticItem: { flexDirection: 'row', alignItems: 'flex-start', marginVertical: 6 },
+  diagnosticItemTitle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b' },
+  diagnosticItemDesc: { fontSize: 12, color: '#64748b', marginTop: 2, lineHeight: 16 },
+  btnRetryModal: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0d6efd', width: '100%', paddingVertical: 13, borderRadius: 10, marginBottom: 10 },
+  btnRetryModalText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
+  btnCancelModal: { paddingVertical: 10, alignItems: 'center', width: '100%' },
+  btnCancelModalText: { color: '#64748b', fontSize: 14, fontWeight: '500' },
+
+  // Modal Resultado
+  modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 },
+  modalTitle: { fontSize: 24, fontWeight: 'bold', marginTop: 20, textAlign: 'center' },
+  modalMessage: { fontSize: 16, color: '#475569', textAlign: 'center', marginTop: 15, marginBottom: 40, lineHeight: 24 },
+  modalButton: { width: 250, paddingVertical: 16, borderRadius: 12, alignItems: 'center', elevation: 2 },
+  modalButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  btnOutlineModal: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: '#0d6efd', borderRadius: 12, paddingVertical: 16 },
+  btnOutlineTextModal: { color: '#0d6efd', fontSize: 16, fontWeight: '600' }
 });
