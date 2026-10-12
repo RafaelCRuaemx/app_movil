@@ -4,5 +4,5 @@
  * o utiliza la IP local de desarrollo como respaldo de contingencia.
  */
 export const API_URL: string = 
-  process.env.EXPO_PUBLIC_API_URL || 'http://192.168.100.9/UAEMex/wsl/Checador/backend/api';
+  process.env.EXPO_PUBLIC_API_URL || 'http://localhost/backend/api';
 

@@ -38,10 +38,23 @@ export default function PerfilScreen() {
     fetchPerfil();
   }, []);
 
-  const handleLogout = async () => {
-    await SecureStore.deleteItemAsync('userToken');
-    await SecureStore.deleteItemAsync('userData');
-    router.replace('/login' as any);
+  const handleLogout = () => {
+    Alert.alert(
+      "Cerrar sesión",
+      "¿Estás seguro de que deseas cerrar tu sesión actual?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { 
+          text: "Cerrar sesión", 
+          style: "destructive", 
+          onPress: async () => {
+            await SecureStore.deleteItemAsync('userToken');
+            await SecureStore.deleteItemAsync('userData');
+            router.replace('/login' as any);
+          } 
+        }
+      ]
+    );
   };
 
   const handleAvatarPress = () => {
@@ -67,7 +80,8 @@ export default function PerfilScreen() {
           mediaTypes: ['images'],
           allowsEditing: true,
           aspect: [1, 1],
-          quality: 0.8,
+          quality: 0.7,
+          base64: true,
         });
       } else {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -76,40 +90,40 @@ export default function PerfilScreen() {
           mediaTypes: ['images'],
           allowsEditing: true,
           aspect: [1, 1],
-          quality: 0.8,
+          quality: 0.7,
+          base64: true,
         });
       }
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        uploadImage(result.assets[0].uri);
+        uploadImage(result.assets[0]);
       }
-    } catch (e) {
-      console.log(e);
+    } catch (e: any) {
+      console.log('Error picker:', e);
+      Alert.alert("Error", "No se pudo seleccionar la imagen: " + (e?.message || e));
     }
   };
 
-  const uploadImage = async (uri: string) => {
+  const uploadImage = async (asset: any) => {
     setLoading(true);
     try {
       const storedData = await SecureStore.getItemAsync('userData');
-      if (!storedData) return;
+      if (!storedData) {
+        Alert.alert("Error", "No se encontró sesión de usuario.");
+        setLoading(false);
+        return;
+      }
       const user = JSON.parse(storedData);
-
-      const formData = new FormData();
-      formData.append('usuario_id', String(user.id));
-      
-      const filename = uri.split('/').pop() || 'photo.jpg';
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1]}` : 'image/jpeg';
-
-      formData.append('foto', { uri, name: filename, type } as any);
 
       const res = await fetch(`${API_URL}/subir_foto_perfil_app.php`, {
         method: 'POST',
-        body: formData,
         headers: {
-          'Content-Type': 'multipart/form-data',
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          usuario_id: user.id,
+          foto_base64: asset.base64,
+        }),
       });
       
       const responseText = await res.text();
@@ -118,20 +132,20 @@ export default function PerfilScreen() {
         json = JSON.parse(responseText);
       } catch (err) {
         console.log("No es JSON:", responseText);
-        Alert.alert("Error del servidor", "Respuesta no válida del servidor.");
+        Alert.alert("Error del servidor", "Respuesta no válida: " + responseText.substring(0, 100));
         setLoading(false);
         return;
       }
 
       if (json.success) {
-        Alert.alert("Éxito", "Foto de perfil actualizada");
+        Alert.alert("Éxito", "Foto de perfil actualizada correctamente");
         fetchPerfil(); 
       } else {
-        Alert.alert("Error", json.message || "Error al subir");
+        Alert.alert("Error al subir", json.message || "El servidor rechazó la imagen.");
       }
-    } catch (e) {
-      console.log(e);
-      Alert.alert("Error", "Error de red al subir la imagen");
+    } catch (e: any) {
+      console.log("Error de subida:", e);
+      Alert.alert("Error de subida", e.message || "Error de red al procesar la imagen");
     } finally {
       setLoading(false);
     }

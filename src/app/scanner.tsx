@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { API_URL } from '../config/api';
+import { clearCachedPreflight, getCachedPreflight } from '../config/preflightCache';
 const BARCODE_SETTINGS = { barcodeTypes: ['qr' as const] };
 
 interface PreflightDetails {
@@ -65,11 +67,56 @@ export default function ScannerScreen() {
     initScanner();
   }, []);
 
+  // Procesa el resultado de validación (usado tanto por caché anticipado como por validación en vivo)
+  const procesarResultadoPreflight = async (preflightRes: any) => {
+    if (preflightRes.es_home_office) {
+      setIsHomeOffice(true);
+      setValidatingPreflight(false);
+      setCameraActive(false);
+      return;
+    }
+
+    // Si no se autoriza el escaneo (por red Wi-Fi o geocerca)
+    if (!preflightRes.permitir_escanear) {
+      setValidatingPreflight(false);
+      setCameraActive(false);
+      setPreflightErrors(preflightRes.errores || [preflightRes.message || 'No cumples con las condiciones para escanear.']);
+      setPreflightData(preflightRes.detalles || null);
+      setPreflightFailedModal(true);
+      return;
+    }
+
+    // 3. Si las validaciones fueron exitosas, verificar permisos de cámara y activar
+    setPreflightData(preflightRes.detalles || null);
+
+    if (!permission?.granted) {
+      const { status: camStatus } = await requestPermission();
+      if (camStatus !== 'granted') {
+        setValidatingPreflight(false);
+        Alert.alert('Aviso', 'Se requieren permisos de cámara para poder escanear el QR.');
+        return;
+      }
+    }
+
+    setValidatingPreflight(false);
+    setCameraActive(true);
+    setScanned(false);
+  };
+
   // Validación de Pre-Vuelo antes de encender la cámara
   const validarYIniciarCamara = async (userParam?: any) => {
     const user = userParam || userData;
     if (!user?.id) {
       Alert.alert('Error', 'No se encontró la sesión de usuario activa.');
+      return;
+    }
+
+    // Si la validación ya fue pre-cargada mientras se autenticaba la huella, consumirla de inmediato (0ms de espera)
+    const cached = getCachedPreflight();
+    if (cached) {
+      clearCachedPreflight();
+      if (cached.location) setLocation(cached.location);
+      await procesarResultadoPreflight(cached.preflightRes);
       return;
     }
 
@@ -111,35 +158,7 @@ export default function ScannerScreen() {
         throw new Error('Respuesta inválida del servidor: ' + responseText.substring(0, 80));
       }
 
-      if (preflightRes.es_home_office) {
-        setIsHomeOffice(true);
-      }
-
-      // Si no se autoriza el escaneo (por red Wi-Fi o geocerca)
-      if (!preflightRes.permitir_escanear) {
-        setValidatingPreflight(false);
-        setCameraActive(false);
-        setPreflightErrors(preflightRes.errores || [preflightRes.message || 'No cumples con las condiciones para escanear.']);
-        setPreflightData(preflightRes.detalles || null);
-        setPreflightFailedModal(true);
-        return;
-      }
-
-      // 3. Si las validaciones fueron exitosas, verificar permisos de cámara y activar
-      setPreflightData(preflightRes.detalles || null);
-
-      if (!permission?.granted) {
-        const { status: camStatus } = await requestPermission();
-        if (camStatus !== 'granted') {
-          setValidatingPreflight(false);
-          Alert.alert('Aviso', 'Se requieren permisos de cámara para poder escanear el QR.');
-          return;
-        }
-      }
-
-      setValidatingPreflight(false);
-      setCameraActive(true);
-      setScanned(false);
+      await procesarResultadoPreflight(preflightRes);
 
     } catch (error: any) {
       setValidatingPreflight(false);
@@ -147,9 +166,31 @@ export default function ScannerScreen() {
     }
   };
 
-  // Registro directo en modalidad Home Office sin necesidad de QR físico
+  // Registro directo en modalidad Home Office con huella digital (sin QR)
   const registrarHomeOfficeDirecto = async () => {
     if (!userData?.id) return;
+
+    // Validación obligatoria con huella digital / Face ID en Home Office
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+      if (hasHardware && isEnrolled) {
+        const authResult = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'Usa tu huella para registrar asistencia en Home Office',
+          cancelLabel: 'Cancelar',
+          disableDeviceFallback: false,
+        });
+
+        if (!authResult.success) {
+          Alert.alert('Autenticación requerida', 'Debes validar tu huella digital para registrar asistencia en Home Office.');
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('Error biometric:', e);
+    }
+
     setLoading(true);
 
     let currentLocation = location;
@@ -336,91 +377,116 @@ export default function ScannerScreen() {
           </View>
         )}
 
-        <Text style={styles.instructionText}>
-          {cameraActive 
-            ? 'Alinea el código QR de la oficina dentro del marco de lectura.'
-            : 'Se validará tu conexión a la red de la oficina y tu ubicación GPS antes de activar la cámara.'}
-        </Text>
+        {isHomeOffice ? (
+          <View style={styles.hoContainerCard}>
+            <View style={styles.hoIconLargeWrap}>
+              <Ionicons name="finger-print" size={54} color="#0284c7" />
+            </View>
+            <Text style={styles.hoMainTitle}>Modalidad Home Office</Text>
+            <Text style={styles.hoMainDesc}>
+              El escaneo de código QR de oficina está inhabilitado para tu jornada remota. Por favor registra tu asistencia con tu huella digital.
+            </Text>
 
-        <View style={styles.cameraWrapper}>
-          <View style={[styles.corner, styles.cornerTL]} />
-          <View style={[styles.corner, styles.cornerTR]} />
-          <View style={[styles.corner, styles.cornerBL]} />
-          <View style={[styles.corner, styles.cornerBR]} />
-
-          {!cameraActive ? (
-             <View style={styles.cameraPlaceholder}>
-               {validatingPreflight ? (
-                 <>
-                   <ActivityIndicator size="large" color="#0d6efd" />
-                   <Text style={[styles.cameraPlaceholderTitle, { color: '#0d6efd' }]}>Validando requisitos...</Text>
-                   <Text style={styles.cameraPlaceholderText}>Comprobando red Wi-Fi y distancia GPS...</Text>
-                 </>
-               ) : (
-                 <>
-                   <Ionicons name="shield-checkmark-outline" size={48} color="#cbd5e1" />
-                   <Text style={styles.cameraPlaceholderTitle}>Validación previa requerida</Text>
-                   <Text style={styles.cameraPlaceholderText}>Presiona el botón para comprobar Wi-Fi y ubicación</Text>
-                 </>
-               )}
-             </View>
-          ) : (
-            <View style={styles.cameraInner}>
-              {isFocused && (
-                <CameraView 
-                  style={StyleSheet.absoluteFill} 
-                  facing="back"
-                  barcodeScannerSettings={BARCODE_SETTINGS}
-                  onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-                />
+            <TouchableOpacity 
+              style={[styles.btnHoBiometric, loading && { opacity: 0.7 }]} 
+              onPress={registrarHomeOfficeDirecto}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+              ) : (
+                <Ionicons name="finger-print" size={22} color="#ffffff" style={{ marginRight: 8 }} />
               )}
+              <Text style={styles.btnHoBiometricText}>
+                {loading ? 'Validando huella...' : 'Checar con Huella Digital'}
+              </Text>
+            </TouchableOpacity>
 
-              {scanned && (
-                <View style={styles.scannedOverlay}>
-                  <ActivityIndicator size="large" color="#0d6efd" />
-                  <Text style={{ marginTop: 10, fontWeight: 'bold', color: '#0d6efd' }}>Procesando lectura...</Text>
+            <TouchableOpacity 
+              style={[styles.btnOutline, { marginTop: 10 }]} 
+              onPress={() => router.replace('/(tab)/' as any)}
+            >
+              <Text style={styles.btnOutlineText}>Ir al Dashboard</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.instructionText}>
+              {cameraActive 
+                ? 'Alinea el código QR de la oficina dentro del marco de lectura.'
+                : 'Se validará tu conexión a la red de la oficina y tu ubicación GPS antes de activar la cámara.'}
+            </Text>
+
+            <View style={styles.cameraWrapper}>
+              <View style={[styles.corner, styles.cornerTL]} />
+              <View style={[styles.corner, styles.cornerTR]} />
+              <View style={[styles.corner, styles.cornerBL]} />
+              <View style={[styles.corner, styles.cornerBR]} />
+
+              {!cameraActive ? (
+                 <View style={styles.cameraPlaceholder}>
+                   {validatingPreflight ? (
+                     <>
+                       <ActivityIndicator size="large" color="#0d6efd" />
+                       <Text style={[styles.cameraPlaceholderTitle, { color: '#0d6efd' }]}>Validando requisitos...</Text>
+                       <Text style={styles.cameraPlaceholderText}>Comprobando red Wi-Fi y distancia GPS...</Text>
+                     </>
+                   ) : (
+                     <>
+                       <Ionicons name="shield-checkmark-outline" size={48} color="#cbd5e1" />
+                       <Text style={styles.cameraPlaceholderTitle}>Validación previa requerida</Text>
+                       <Text style={styles.cameraPlaceholderText}>Presiona el botón para comprobar Wi-Fi y ubicación</Text>
+                     </>
+                   )}
+                 </View>
+              ) : (
+                <View style={styles.cameraInner}>
+                  {isFocused && (
+                    <CameraView 
+                      style={StyleSheet.absoluteFill} 
+                      facing="back"
+                      barcodeScannerSettings={BARCODE_SETTINGS}
+                      onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+                    />
+                  )}
+
+                  {scanned && (
+                    <View style={styles.scannedOverlay}>
+                      <ActivityIndicator size="large" color="#0d6efd" />
+                      <Text style={{ marginTop: 10, fontWeight: 'bold', color: '#0d6efd' }}>Procesando lectura...</Text>
+                    </View>
+                  )}
                 </View>
               )}
             </View>
-          )}
-        </View>
 
-        {!cameraActive ? (
-          <TouchableOpacity 
-            style={[styles.btnPrimary, validatingPreflight && { opacity: 0.7 }]} 
-            onPress={() => validarYIniciarCamara()}
-            disabled={validatingPreflight}
-          >
-            {validatingPreflight ? (
-              <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+            {!cameraActive ? (
+              <TouchableOpacity 
+                style={[styles.btnPrimary, validatingPreflight && { opacity: 0.7 }]} 
+                onPress={() => validarYIniciarCamara()}
+                disabled={validatingPreflight}
+              >
+                {validatingPreflight ? (
+                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                ) : (
+                  <Ionicons name="videocam" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+                )}
+                <Text style={styles.btnPrimaryText}>
+                  {validatingPreflight ? 'Verificando entorno...' : 'Validar y activar cámara'}
+                </Text>
+              </TouchableOpacity>
+            ) : scanned ? (
+              <TouchableOpacity style={styles.btnOutline} onPress={() => setScanned(false)}>
+                <Ionicons name="refresh" size={20} color="#0d6efd" style={{ marginRight: 8 }} />
+                <Text style={styles.btnOutlineText}>Escanear de nuevo</Text>
+              </TouchableOpacity>
             ) : (
-              <Ionicons name="videocam" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+              <TouchableOpacity style={styles.btnOutline} onPress={() => setCameraActive(false)}>
+                <Ionicons name="stop-circle-outline" size={20} color="#64748b" style={{ marginRight: 8 }} />
+                <Text style={[styles.btnOutlineText, { color: '#64748b' }]}>Detener cámara</Text>
+              </TouchableOpacity>
             )}
-            <Text style={styles.btnPrimaryText}>
-              {validatingPreflight ? 'Verificando entorno...' : 'Validar y activar cámara'}
-            </Text>
-          </TouchableOpacity>
-        ) : scanned ? (
-          <TouchableOpacity style={styles.btnOutline} onPress={() => setScanned(false)}>
-            <Ionicons name="refresh" size={20} color="#0d6efd" style={{ marginRight: 8 }} />
-            <Text style={styles.btnOutlineText}>Escanear de nuevo</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={styles.btnOutline} onPress={() => setCameraActive(false)}>
-            <Ionicons name="stop-circle-outline" size={20} color="#64748b" style={{ marginRight: 8 }} />
-            <Text style={[styles.btnOutlineText, { color: '#64748b' }]}>Detener cámara</Text>
-          </TouchableOpacity>
-        )}
-
-        {isHomeOffice && (
-          <TouchableOpacity 
-            style={styles.btnHomeOffice} 
-            onPress={registrarHomeOfficeDirecto}
-            disabled={loading}
-          >
-            <Ionicons name="home-outline" size={18} color="#0284c7" style={{ marginRight: 8 }} />
-            <Text style={styles.btnHomeOfficeText}>Registrar asistencia Home Office (Sin QR)</Text>
-          </TouchableOpacity>
+          </>
         )}
 
         {locationError ? (
@@ -583,6 +649,14 @@ const styles = StyleSheet.create({
 
   btnHomeOffice: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#e0f2fe', borderWidth: 1, borderColor: '#7dd3fc', borderRadius: 12, paddingVertical: 13, marginBottom: 10 },
   btnHomeOfficeText: { color: '#0369a1', fontSize: 14, fontWeight: 'bold' },
+
+  // Estilos de Home Office Biométrico
+  hoContainerCard: { width: '100%', backgroundColor: '#f0f9ff', borderRadius: 20, borderWidth: 1, borderColor: '#bae6fd', padding: 24, alignItems: 'center', marginBottom: 20 },
+  hoIconLargeWrap: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
+  hoMainTitle: { fontSize: 18, fontWeight: 'bold', color: '#0369a1', textAlign: 'center', marginBottom: 8 },
+  hoMainDesc: { fontSize: 13, color: '#0284c7', textAlign: 'center', marginBottom: 24, lineHeight: 18 },
+  btnHoBiometric: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#0284c7', borderRadius: 12, paddingVertical: 14, marginBottom: 10 },
+  btnHoBiometricText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
 
   // Modal Diagnóstico de Pre-vuelo
   backdropModal: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 },

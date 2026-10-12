@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { API_URL } from '../../config/api';
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -10,6 +11,7 @@ const DIAS_SEMANA_COMPLETO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueve
 export default function HistorialScreen() {
   const [historial, setHistorial] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [mesActual, setMesActual] = useState(new Date().getMonth() + 1);
   const [anioActual, setAnioActual] = useState(new Date().getFullYear());
   const [diaSeleccionado, setDiaSeleccionado] = useState<number>(new Date().getDate());
@@ -41,6 +43,12 @@ export default function HistorialScreen() {
   useEffect(() => {
     fetchHistorial();
   }, [fetchHistorial]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchHistorial();
+    }, [fetchHistorial])
+  );
 
   const irMesAnterior = () => {
     if (mesActual === 1) {
@@ -146,7 +154,20 @@ export default function HistorialScreen() {
         <Text style={styles.headerTitle}>Calendario de Asistencias</Text>
       </View>
 
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={async () => {
+              setRefreshing(true);
+              await fetchHistorial();
+              setRefreshing(false);
+            }} 
+          />
+        }
+      >
         {/* NAVEGADOR DE MES */}
         <View style={styles.monthSelectorCard}>
           <TouchableOpacity onPress={irMesAnterior} style={styles.monthNavBtn}>

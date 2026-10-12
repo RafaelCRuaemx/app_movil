@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, RefreshControl, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as Location from 'expo-location';
 import { router, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as Location from 'expo-location';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, Modal, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { API_URL } from '../../config/api';
 
@@ -13,6 +14,12 @@ export default function TabIndexScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [mostrarDetalles, setMostrarDetalles] = useState(false);
   const [registrandoHO, setRegistrandoHO] = useState(false);
+
+  // Estados para modal elegante de confirmación / avisos
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalType, setModalType] = useState<'success' | 'error'>('success');
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalMessage, setModalMessage] = useState('');
 
   const loadData = async () => {
     try {
@@ -52,59 +59,85 @@ export default function TabIndexScreen() {
     if (!userData?.id) return;
     const pasoActual = dashboardData?.hero_btn_text?.toLowerCase() || 'asistencia';
 
-    Alert.alert(
-      'Registro Home Office',
-      `¿Deseas registrar tu ${pasoActual} en modalidad remota ahora?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Confirmar',
-          onPress: async () => {
-            setRegistrandoHO(true);
-            try {
-              let lat = null;
-              let lon = null;
-              let acc = null;
-              try {
-                let { status } = await Location.requestForegroundPermissionsAsync();
-                if (status === 'granted') {
-                  const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-                  lat = loc.coords.latitude;
-                  lon = loc.coords.longitude;
-                  acc = loc.coords.accuracy;
-                }
-              } catch (e) {
-                // Silencioso si no se pudo obtener GPS
-              }
-
-              const res = await fetch(`${API_URL}/registrar_asistencia_home_office_app.php`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  usuario_id: userData.id,
-                  lat,
-                  lon,
-                  gps_acc: acc
-                })
-              });
-
-              const json = await res.json();
-              setRegistrandoHO(false);
-
-              if (json.success) {
-                Alert.alert('¡Excelente!', json.registro ? `Registro completado a las ${json.registro.hora} en modalidad remota.` : 'Asistencia remota registrada con éxito.');
-                await loadData();
-              } else {
-                Alert.alert('Aviso', json.motivo || json.message || 'No fue posible registrar asistencia.');
-              }
-            } catch (err: any) {
-              setRegistrandoHO(false);
-              Alert.alert('Error', 'No se pudo conectar con el servidor: ' + err.message);
-            }
-          }
+    // Iniciar captura de ubicación en paralelo mientras el usuario coloca su huella
+    const locPromise = (async () => {
+      try {
+        let { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const lastLoc = await Location.getLastKnownPositionAsync();
+          if (lastLoc) return lastLoc;
+          return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         }
-      ]
-    );
+      } catch (e) {}
+      return null;
+    })();
+
+    // Validación obligatoria con huella digital / Face ID en Home Office
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+      if (hasHardware && isEnrolled) {
+        const authResult = await LocalAuthentication.authenticateAsync({
+          promptMessage: `Confirma tu identidad para registrar ${pasoActual}`,
+          cancelLabel: 'Cancelar',
+          disableDeviceFallback: false,
+        });
+
+        if (!authResult.success) {
+          setModalType('error');
+          setModalTitle('Autenticación Requerida');
+          setModalMessage('Debes validar tu huella digital para registrar asistencia en Home Office.');
+          setModalVisible(true);
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('Error biometric:', e);
+    }
+
+    setRegistrandoHO(true);
+    try {
+      const loc = await locPromise;
+      const lat = loc?.coords?.latitude ?? null;
+      const lon = loc?.coords?.longitude ?? null;
+      const acc = loc?.coords?.accuracy ?? null;
+
+      const res = await fetch(`${API_URL}/registrar_asistencia_home_office_app.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usuario_id: userData.id,
+          lat,
+          lon,
+          gps_acc: acc
+        })
+      });
+
+      const json = await res.json();
+      setRegistrandoHO(false);
+
+      if (json.success) {
+        setModalType('success');
+        setModalTitle('¡Registro Exitoso!');
+        setModalMessage(json.registro?.hora 
+          ? `Tu marcaje fue registrado correctamente a las ${json.registro.hora} en modalidad remota.`
+          : 'Asistencia en modalidad Home Office confirmada con éxito.');
+        setModalVisible(true);
+        await loadData();
+      } else {
+        setModalType('error');
+        setModalTitle('Aviso de Asistencia');
+        setModalMessage(json.motivo || json.message || 'No fue posible registrar tu asistencia en este momento.');
+        setModalVisible(true);
+      }
+    } catch (err: any) {
+      setRegistrandoHO(false);
+      setModalType('error');
+      setModalTitle('Error de Conexión');
+      setModalMessage('No se pudo conectar con el servidor: ' + err.message);
+      setModalVisible(true);
+    }
   };
 
   const userName = userData?.nombre ? userData.nombre.split(' ')[0] : 'Colaborador';
@@ -218,7 +251,7 @@ export default function TabIndexScreen() {
         {/* ACCIONES DE REGISTRO */}
         {dashboardData?.proximo_paso !== 'completo' && (
           <View style={{ marginBottom: 25 }}>
-            {dashboardData?.es_home_office && (
+            {dashboardData?.es_home_office ? (
               <TouchableOpacity 
                 style={[styles.btnHomeOfficeAction, registrandoHO && { opacity: 0.7 }]} 
                 onPress={registrarHomeOfficeDirecto}
@@ -227,20 +260,20 @@ export default function TabIndexScreen() {
                 {registrandoHO ? (
                   <ActivityIndicator size="small" color="#0369a1" style={{ marginRight: 8 }} />
                 ) : (
-                  <Ionicons name="cloud-upload-outline" size={22} color="#0369a1" style={{ marginRight: 8 }} />
+                  <Ionicons name="finger-print" size={24} color="#0369a1" style={{ marginRight: 10 }} />
                 )}
                 <Text style={styles.btnHomeOfficeActionText}>
-                  {registrandoHO ? 'Registrando remota...' : 'Checar Asistencia Remota (1-Tap)'}
+                  {registrandoHO ? 'Validando huella...' : `Checar con Huella (${dashboardData?.hero_btn_text || 'Remoto'})`}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.bigScanBtn} onPress={() => router.push('/scanner')}>
+                <Ionicons name={getIconForStep(dashboardData?.proximo_paso)} size={24} color="white" style={{ marginRight: 10 }} />
+                <Text style={styles.bigScanBtnText}>
+                  {dashboardData?.hero_btn_text || 'Escanear QR'}
                 </Text>
               </TouchableOpacity>
             )}
-
-            <TouchableOpacity style={styles.bigScanBtn} onPress={() => router.push('/scanner')}>
-              <Ionicons name={getIconForStep(dashboardData?.proximo_paso)} size={24} color="white" style={{ marginRight: 10 }} />
-              <Text style={styles.bigScanBtnText}>
-                {dashboardData?.es_home_office ? 'O escanear código QR' : (dashboardData?.hero_btn_text || 'Escanear QR')}
-              </Text>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -335,6 +368,31 @@ export default function TabIndexScreen() {
         </View>
 
       </ScrollView>
+
+      {/* MODAL ELEGANTE DE RESULTADO / AVISOS */}
+      <Modal visible={modalVisible} transparent={true} animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={[styles.modalIconWrap, { backgroundColor: modalType === 'success' ? '#dcfce7' : '#fee2e2' }]}>
+              <Ionicons 
+                name={modalType === 'success' ? "checkmark-circle" : "alert-circle"} 
+                size={48} 
+                color={modalType === 'success' ? "#16a34a" : "#dc2626"} 
+              />
+            </View>
+
+            <Text style={styles.modalTitle}>{modalTitle}</Text>
+            <Text style={styles.modalMessage}>{modalMessage}</Text>
+
+            <TouchableOpacity 
+              style={[styles.modalButton, { backgroundColor: modalType === 'success' ? '#16a34a' : '#0d6efd' }]} 
+              onPress={() => setModalVisible(false)}
+            >
+              <Text style={styles.modalButtonText}>Entendido</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -442,5 +500,14 @@ const styles = StyleSheet.create({
   hoTitle: { fontSize: 14, fontWeight: 'bold', color: '#0369a1' },
   hoSubtitle: { fontSize: 12, color: '#0284c7', marginTop: 2, lineHeight: 17 },
   btnHomeOfficeAction: { flexDirection: 'row', backgroundColor: '#e0f2fe', borderWidth: 1.5, borderColor: '#38bdf8', borderRadius: 12, paddingVertical: 15, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
-  btnHomeOfficeActionText: { color: '#0284c7', fontSize: 15, fontWeight: 'bold' }
+  btnHomeOfficeActionText: { color: '#0284c7', fontSize: 15, fontWeight: 'bold' },
+
+  // Modal de Aviso / Éxito Elegante
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  modalCard: { width: '100%', maxWidth: 340, backgroundColor: '#ffffff', borderRadius: 24, padding: 24, alignItems: 'center', elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.18, shadowRadius: 16 },
+  modalIconWrap: { width: 72, height: 72, borderRadius: 36, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#0f172a', textAlign: 'center', marginBottom: 8 },
+  modalMessage: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 24, lineHeight: 20, paddingHorizontal: 4 },
+  modalButton: { width: '100%', paddingVertical: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  modalButtonText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' }
 });

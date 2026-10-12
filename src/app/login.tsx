@@ -6,8 +6,10 @@ import {
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../config/api';
+import { setCachedPreflight } from '../config/preflightCache';
 
 export default function LoginScreen() {
   const [correo, setCorreo] = useState('');
@@ -43,6 +45,23 @@ export default function LoginScreen() {
   };
 
   const handleBiometricLogin = async (keyOverride?: string) => {
+    // Iniciar captura de GPS en segundo plano al mismo tiempo que se muestra la huella
+    const locPromise = (async () => {
+      try {
+        let { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          const req = await Location.requestForegroundPermissionsAsync();
+          status = req.status;
+        }
+        if (status === 'granted') {
+          return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        }
+      } catch (e) {
+        // Silencioso
+      }
+      return null;
+    })();
+
     try {
       const authResult = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Usa tu huella para iniciar sesión',
@@ -54,20 +73,47 @@ export default function LoginScreen() {
         setLoading(true);
         const deviceKey = keyOverride && typeof keyOverride === 'string' ? keyOverride : await SecureStore.getItemAsync('deviceKey');
         
-        const response = await fetch(`${API_URL}/login_biometrico_app.php`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ device_key: deviceKey })
-        });
+        // Ejecutar login biométrico y resolver GPS en paralelo
+        const [loginRes, loc] = await Promise.all([
+          fetch(`${API_URL}/login_biometrico_app.php`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_key: deviceKey })
+          }).then(r => r.json()),
+          locPromise
+        ]);
 
-        const data = await response.json();
-
-        if (data.success) {
+        if (loginRes.success) {
           await SecureStore.setItemAsync('userToken', 'active_session');
-          await SecureStore.setItemAsync('userData', JSON.stringify(data.user));
+          await SecureStore.setItemAsync('userData', JSON.stringify(loginRes.user));
+
+          // Si obtuvimos ubicación y usuario, ejecutar validación de pre-vuelo anticipadamente
+          if (loc && loginRes.user?.id) {
+            try {
+              const preflightRes = await fetch(`${API_URL}/validar_prevuelo_app.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  usuario_id: loginRes.user.id,
+                  lat: loc.coords.latitude,
+                  lon: loc.coords.longitude
+                })
+              }).then(r => r.json());
+
+              // Guardar en caché para que /scanner la consuma al instante con 0ms de espera
+              setCachedPreflight({
+                timestamp: Date.now(),
+                location: loc,
+                preflightRes
+              });
+            } catch (errPrevuelo) {
+              console.log('Error preflight anticipado:', errPrevuelo);
+            }
+          }
+
           router.replace('/scanner' as any);
         } else {
-          Alert.alert('Aviso', data.message);
+          Alert.alert('Aviso', loginRes.message);
           await SecureStore.deleteItemAsync('deviceKey');
           setHasSavedDeviceKey(false);
         }
