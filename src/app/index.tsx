@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+
 
 export default function Index() {
   const [isChecking, setIsChecking] = useState(true);
@@ -12,14 +13,8 @@ export default function Index() {
         const deviceKey = await SecureStore.getItemAsync('deviceKey');
         const token = await SecureStore.getItemAsync('userToken');
 
-        // Si el dispositivo tiene huella digital vinculada, SIEMPRE debe autenticarse en el login
-        if (deviceKey) {
-          router.replace('/login' as any);
-        } else if (token) {
-          router.replace('/scanner' as any);
-        } else {
-          router.replace('/login' as any);
-        }
+        // Por seguridad 1 a 1, cada inicio de app debe validarse por biometría en el Login
+        router.replace('/login' as any);
       } catch (error) {
         console.error('Error verificando session', error);
         router.replace('/login' as any);
@@ -40,3 +35,5 @@ export default function Index() {
 
   return null;
 }
+
+

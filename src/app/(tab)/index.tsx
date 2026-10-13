@@ -4,7 +4,7 @@ import * as Location from 'expo-location';
 import { router, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Modal, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { API_URL } from '../../config/api';
 
@@ -53,6 +53,25 @@ export default function TabIndexScreen() {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      "Cerrar sesión",
+      "¿Estás seguro de que deseas cerrar tu sesión actual?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { 
+          text: "Cerrar sesión", 
+          style: "destructive", 
+          onPress: async () => {
+            await SecureStore.deleteItemAsync('userToken');
+            await SecureStore.deleteItemAsync('userData');
+            router.replace('/login' as any);
+          } 
+        }
+      ]
+    );
   };
 
   const registrarHomeOfficeDirecto = async () => {
@@ -178,8 +197,12 @@ export default function TabIndexScreen() {
             </View>
           </View>
           <View style={styles.headerRight}>
-            <TouchableOpacity onPress={() => loadData()}>
-              <Ionicons name="notifications-outline" size={24} color="#64748b" />
+            <TouchableOpacity 
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="log-out-outline" size={22} color="#dc2626" />
             </TouchableOpacity>
           </View>
         </View>
@@ -447,6 +470,16 @@ const styles = StyleSheet.create({
   welcomeText: { fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 0.5 },
   userName: { fontSize: 16, fontWeight: 'bold', color: '#0f172a' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
+  logoutButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fee2e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   card: { backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', padding: 20, marginBottom: 16 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between' },
   label: { fontSize: 12, fontWeight: '700', color: '#64748b', letterSpacing: 0.5 },

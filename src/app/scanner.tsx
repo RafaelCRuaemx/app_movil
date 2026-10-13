@@ -124,8 +124,13 @@ export default function ScannerScreen() {
     setLocationError(null);
 
     try {
-      // 1. Solicitar y obtener ubicación GPS con precisión
-      let { status } = await Location.requestForegroundPermissionsAsync();
+      // 1. Verificar permiso sin invocar diálogo nativo si ya fue otorgado
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        const req = await Location.requestForegroundPermissionsAsync();
+        status = req.status;
+      }
+
       if (status !== 'granted') {
         setValidatingPreflight(false);
         setLocationError('Permiso de ubicación GPS denegado.');
@@ -136,17 +141,43 @@ export default function ScannerScreen() {
         return;
       }
 
-      let loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      // 2. Adquisición ultra-rápida de GPS (prioriza última posición conocida en ~30ms)
+      let loc = location;
+      const ahora = Date.now();
+
+      // Si ya teníamos una posición reciente en memoria (menos de 20 seg), reutilizarla de inmediato
+      if (!loc || (ahora - loc.timestamp > 20000)) {
+        try {
+          const lastKnown = await Location.getLastKnownPositionAsync();
+          if (lastKnown && (ahora - lastKnown.timestamp < 30000)) {
+            loc = lastKnown;
+          } else {
+            // Si no hay posición reciente en caché, obtenerla con carrera y timeout de 3.5s
+            const freshPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
+            const fresh = await Promise.race([freshPromise, timeoutPromise]);
+            loc = fresh || lastKnown;
+          }
+        } catch (eGps) {
+          // Fallback a posición en caché si existía
+        }
+      }
+
+      // Si aún no hay posición en hardware, último intento directo
+      if (!loc) {
+        loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      }
+
       setLocation(loc);
 
-      // 2. Ejecutar validación de pre-vuelo con el backend
+      // 3. Ejecutar validación de pre-vuelo con el backend
       const res = await fetch(`${API_URL}/validar_prevuelo_app.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           usuario_id: user.id,
-          lat: loc.coords.latitude,
-          lon: loc.coords.longitude
+          lat: loc?.coords.latitude,
+          lon: loc?.coords.longitude
         })
       });
 

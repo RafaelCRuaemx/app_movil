@@ -1,25 +1,38 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, 
-  KeyboardAvoidingView, Platform, ActivityIndicator, Modal 
-} from 'react-native';
-import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
+import { Ionicons } from '@expo/vector-icons';
+import * as Device from 'expo-device';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
-import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text, TextInput, TouchableOpacity,
+  View
+} from 'react-native';
 import { API_URL } from '../config/api';
 import { setCachedPreflight } from '../config/preflightCache';
 
 export default function LoginScreen() {
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false); 
   const [loading, setLoading] = useState(false);
   const [isBiometricSupported, setIsBiometricSupported] = useState(false);
   const [hasSavedDeviceKey, setHasSavedDeviceKey] = useState(false);
 
   const [showBiometricPrompt, setShowBiometricPrompt] = useState(false);
   const [tempAuthData, setTempAuthData] = useState<any>(null);
+
+  // Nuevos estados para Google Authenticator (Nivel Administrativo: Admin, RH, Gerente)
+  const [showTotpModal, setShowTotpModal] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
+  const [totpUserId, setTotpUserId] = useState<number | null>(null);
 
   useEffect(() => {
     checkBiometrics();
@@ -44,6 +57,15 @@ export default function LoginScreen() {
     return 'movil_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
   };
 
+  const getDeviceDisplayName = () => {
+    const brand = Device.brand || Device.manufacturer || '';
+    const model = Device.modelName || Device.deviceName || 'Dispositivo';
+    const os = Platform.OS === 'ios' ? 'iOS' : 'Android';
+    const osVersion = Device.osVersion ? ` ${Device.osVersion}` : '';
+    const full = `${brand} ${model} (${os}${osVersion})`.trim();
+    return full.length > 0 ? full : (Platform.OS === 'ios' ? 'iPhone' : 'Android');
+  };
+
   const handleBiometricLogin = async (keyOverride?: string) => {
     // Iniciar captura de GPS en segundo plano al mismo tiempo que se muestra la huella
     const locPromise = (async () => {
@@ -54,7 +76,14 @@ export default function LoginScreen() {
           status = req.status;
         }
         if (status === 'granted') {
-          return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          const lastLoc = await Location.getLastKnownPositionAsync();
+          if (lastLoc && (Date.now() - lastLoc.timestamp < 30000)) {
+            return lastLoc;
+          }
+          return await Promise.race([
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+            new Promise<Location.LocationObject | null>((resolve) => setTimeout(() => resolve(lastLoc || null), 2000))
+          ]);
         }
       } catch (e) {
         // Silencioso
@@ -113,7 +142,7 @@ export default function LoginScreen() {
 
           router.replace('/scanner' as any);
         } else {
-          Alert.alert('Aviso', loginRes.message);
+          Alert.alert('Dispositivo no reconocido', loginRes.message);
           await SecureStore.deleteItemAsync('deviceKey');
           setHasSavedDeviceKey(false);
         }
@@ -142,18 +171,65 @@ export default function LoginScreen() {
       const data = await response.json();
 
       if (data.success) {
-        if (isBiometricSupported && !hasSavedDeviceKey) {
-          // Mostrar nuestro modal personalizado en lugar del Alert
-          setTempAuthData({ user: data.user, email: correo, pass: password });
-          setShowBiometricPrompt(true);
-        } else {
-          finalizaLogin(data.user);
+        // Caso 1: Usuario con nivel Administrativo (Admin, RH, Gerente) -> Verificación con Google Authenticator
+        if (data.requiere_2fa) {
+          setTotpUserId(data.usuario_id);
+          setTotpCode('');
+          setShowTotpModal(true);
+          return;
         }
+
+        // Caso 2: Colaborador operativo -> Requiere dispositivo móvil con huella digital
+        if (!isBiometricSupported) {
+          Alert.alert(
+            'Sensor biométrico no detectado',
+            'Para la seguridad del checador de asistencia, este dispositivo requiere tener sensor de huella dactilar o Face ID activo.'
+          );
+          return;
+        }
+
+        // Credenciales válidas de primer registro: Desplegar vinculación obligatoria
+        setTempAuthData({ user: data.user, email: correo, pass: password });
+        setShowBiometricPrompt(true);
       } else {
         Alert.alert('Acceso Denegado', data.message || 'Error desconocido.');
       }
     } catch (error) {
       Alert.alert('Error de red', 'No se pudo conectar con el servidor.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerificarTotp = async () => {
+    if (totpCode.trim().length !== 6) {
+      Alert.alert('Aviso', 'El código de Google Authenticator debe tener exactamente 6 dígitos.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/verificar_2fa_app.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          usuario_id: totpUserId,
+          codigo_totp: totpCode.trim()
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setShowTotpModal(false);
+        setTotpCode('');
+        finalizaLogin(data.user);
+      } else {
+        Alert.alert('Código incorrecto', data.message || 'El código no es válido o ha expirado.');
+      }
+    } catch (error: any) {
+      console.log('Error al verificar 2FA:', error);
+      Alert.alert('Error de conexión', error?.message || 'No se pudo verificar el código con el servidor.');
     } finally {
       setLoading(false);
     }
@@ -166,22 +242,27 @@ export default function LoginScreen() {
     }
   };
 
-  const omitirVinculacion = () => {
+  const cancelarVinculacion = () => {
     setShowBiometricPrompt(false);
-    if (tempAuthData) {
-      finalizaLogin(tempAuthData.user);
-    }
+    setTempAuthData(null);
+    Alert.alert(
+      'Vinculación Requerida',
+      'Por seguridad institucional, es obligatorio vincular tu huella para poder utilizar el checador en este dispositivo.'
+    );
   };
 
   const linkDevice = async (user: any, email: string, pass: string) => {
     try {
       const authResult = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Confirma tu huella para vincular este equipo',
+        promptMessage: 'Confirma tu huella para vincular este equipo exclusivamente a tu cuenta',
+        cancelLabel: 'Cancelar',
+        disableDeviceFallback: true,
       });
 
       if (authResult.success) {
         setLoading(true);
         const newDeviceKey = generateDeviceKey();
+        const deviceName = getDeviceDisplayName();
         
         const response = await fetch(`${API_URL}/registrar_dispositivo_app.php`, {
           method: 'POST',
@@ -190,7 +271,7 @@ export default function LoginScreen() {
             correo: email, 
             password: pass, 
             device_key: newDeviceKey,
-            nombre_device: Platform.OS === 'ios' ? 'iPhone' : 'Android'
+            nombre_device: deviceName
           })
         });
 
@@ -199,16 +280,19 @@ export default function LoginScreen() {
         if (data.success) {
           await SecureStore.setItemAsync('deviceKey', newDeviceKey);
           setHasSavedDeviceKey(true);
-          finalizaLogin(user);
+          Alert.alert(
+            '¡Dispositivo Vinculado!',
+            `Tu equipo (${deviceName}) ha quedado registrado exitosamente como tu dispositivo oficial de asistencia.`
+          );
+          finalizaLogin(data.user || user);
         } else {
-          Alert.alert('No se pudo vincular', data.message);
-          finalizaLogin(user);
+          Alert.alert('No se pudo vincular', data.message || 'Error al vincular el dispositivo.');
         }
       } else {
-        finalizaLogin(user);
+        Alert.alert('Cancelado', 'Debes confirmar tu huella para vincular este teléfono.');
       }
     } catch (error) {
-      finalizaLogin(user);
+      Alert.alert('Error', 'No se pudo conectar con el servidor al vincular el dispositivo.');
     } finally {
       setLoading(false);
     }
@@ -219,6 +303,7 @@ export default function LoginScreen() {
     await SecureStore.setItemAsync('userData', JSON.stringify(user));
     router.replace('/scanner' as any);
   };
+
 
   return (
     <KeyboardAvoidingView 
@@ -244,9 +329,15 @@ export default function LoginScreen() {
               onPress={() => handleBiometricLogin()}
               disabled={loading}
             >
-              <Ionicons name="finger-print" size={40} color="white" />
+              {loading ? (
+                <ActivityIndicator size="large" color="white" />
+              ) : (
+                <Ionicons name="finger-print" size={40} color="white" />
+              )}
             </TouchableOpacity>
-            <Text style={styles.biometricSub}>Toca para ingresar</Text>
+            <Text style={styles.biometricSub}>
+              {loading ? 'Iniciando sesión...' : 'Toca para ingresar'}
+            </Text>
           </View>
         ) : (
           // PANTALLA NORMAL CUANDO NO HAY DISPOSITIVO VINCULADO
@@ -264,18 +355,27 @@ export default function LoginScreen() {
               />
             </View>
 
-            <View style={styles.inputGroup}>
+            <View style = {styles.inputGroup}>
               <Ionicons name="lock-closed-outline" size={20} color="#6c757d" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Contraseña"
-                placeholderTextColor="#adb5bd"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-              />
-            </View>
-
+  <TextInput
+    style={styles.input}
+    placeholder="Contraseña"
+    placeholderTextColor="#adb5bd"
+    value={password}
+    onChangeText={setPassword}
+    secureTextEntry={!showPassword} // Si showPassword es false se oculta, si es true se muestra
+  />
+  <TouchableOpacity 
+    onPress={() => setShowPassword(!showPassword)}
+    style={{ padding: 4 }}
+  >
+    <Ionicons 
+      name={showPassword ? "eye-off-outline" : "eye-outline"} 
+      size={22} 
+      color="#6c757d" 
+    />
+  </TouchableOpacity>
+</View>
             <TouchableOpacity 
               style={[styles.button, loading && styles.buttonDisabled]} 
               onPress={handleNormalLogin}
@@ -297,26 +397,104 @@ export default function LoginScreen() {
         animationType="fade"
         transparent={true}
         visible={showBiometricPrompt}
-        onRequestClose={omitirVinculacion}
+        onRequestClose={cancelarVinculacion}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalIconBox}>
-              <Ionicons name="finger-print" size={40} color="#0d6efd" />
+              <Ionicons name="shield-checkmark" size={40} color="#0d6efd" />
             </View>
-            <Text style={styles.modalTitle}>Acceso Rápido y Seguro</Text>
+            <Text style={styles.modalTitle}>Vinculación Obligatoria 1 a 1</Text>
             <Text style={styles.modalText}>
-              ¿Deseas vincular este dispositivo a tu cuenta? 
-              La próxima vez podrás iniciar sesión al instante solo con tu huella digital o rostro, sin tener que escribir tu contraseña.
+              Por políticas de seguridad institucional, tu cuenta debe quedar vinculada exclusivamente a este teléfono. 
+              {'\n\n'}
+              A partir de ahora iniciarás sesión con tu huella dactilar y nadie más podrá checar por ti desde otro celular.
             </Text>
             
             <TouchableOpacity style={styles.modalBtnPrimary} onPress={confirmarVinculacion}>
-              <Text style={styles.modalBtnPrimaryText}>Sí, vincular mi huella</Text>
+              <Text style={styles.modalBtnPrimaryText}>Vincular mi huella a este equipo</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.modalBtnSecondary} onPress={omitirVinculacion}>
-              <Text style={styles.modalBtnSecondaryText}>No por ahora</Text>
+            <TouchableOpacity style={styles.modalBtnSecondary} onPress={cancelarVinculacion}>
+              <Text style={styles.modalBtnSecondaryText}>Cancelar</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal 2FA: Verificación con Google Authenticator para Administrativos */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showTotpModal}
+        onRequestClose={() => {
+          setShowTotpModal(false);
+          setTotpCode('');
+        }}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContent}>
+            <View style={[styles.modalIconBox, { backgroundColor: '#e8f0fe' }]}>
+              <Ionicons name="shield-checkmark" size={40} color="#1a73e8" />
+            </View>
+            <Text style={styles.modalTitle}>Verificación en 2 Pasos</Text>
+            <Text style={styles.modalText}>
+              Ingresa el código dinámico de 6 dígitos generado por tu aplicación de <Text style={{ fontWeight: 'bold', color: '#1a73e8' }}>Google Authenticator</Text>.
+            </Text>
+
+            <View style={styles.totpInputContainer}>
+              <TextInput
+                style={styles.totpInput}
+                placeholder="••••••"
+                placeholderTextColor="#adb5bd"
+                value={totpCode}
+                onChangeText={(text) => setTotpCode(text.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                maxLength={6}
+                autoFocus={true}
+                textAlign="center"
+              />
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.modalBtnPrimary, { backgroundColor: '#1a73e8' }, loading && styles.buttonDisabled]} 
+              onPress={handleVerificarTotp}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text style={styles.modalBtnPrimaryText}>Verificar Código</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.modalBtnSecondary} 
+              onPress={() => {
+                setShowTotpModal(false);
+                setTotpCode('');
+              }}
+              disabled={loading}
+            >
+              <Text style={styles.modalBtnSecondaryText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal 
+        transparent={true} 
+        visible={loading && hasSavedDeviceKey} 
+        animationType="fade"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { paddingVertical: 35 }]}>
+            <ActivityIndicator size="large" color="#0d6efd" style={{ marginBottom: 15 }} />
+            <Text style={styles.modalTitle}>Acceso Seguro</Text>
+            <Text style={styles.modalText}>Identidad verificada. Preparando el checador...</Text>
           </View>
         </View>
       </Modal>
@@ -370,5 +548,24 @@ const styles = StyleSheet.create({
   modalBtnPrimary: { backgroundColor: '#0d6efd', width: '100%', paddingVertical: 15, borderRadius: 12, alignItems: 'center', marginBottom: 15 },
   modalBtnPrimaryText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
   modalBtnSecondary: { paddingVertical: 10 },
-  modalBtnSecondaryText: { color: '#64748b', fontSize: 15, fontWeight: '600' }
+  modalBtnSecondaryText: { color: '#64748b', fontSize: 15, fontWeight: '600' },
+
+  totpInputContainer: {
+    width: '100%',
+    marginBottom: 25,
+    alignItems: 'center',
+  },
+  totpInput: {
+    width: '85%',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 14,
+    paddingVertical: 14,
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: 10,
+    color: '#1a73e8',
+    textAlign: 'center',
+    borderWidth: 2,
+    borderColor: '#d2e3fc',
+  },
 });
