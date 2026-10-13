@@ -3,10 +3,13 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Location from 'expo-location';
 import { router, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { API_URL } from '../../config/api';
+import * as Haptics from 'expo-haptics';
+import { programarAlertaComida, cancelarAlertaComida } from '@/services/notificationService';
 
 export default function TabIndexScreen() {
   const [userData, setUserData] = useState<any>(null);
@@ -14,6 +17,16 @@ export default function TabIndexScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [mostrarDetalles, setMostrarDetalles] = useState(false);
   const [registrandoHO, setRegistrandoHO] = useState(false);
+
+  // Reloj digital en vivo
+  const [horaActual, setHoraActual] = useState(new Date().toLocaleTimeString('es-MX'));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setHoraActual(new Date().toLocaleTimeString('es-MX'));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Estados para modal elegante de confirmación / avisos
   const [modalVisible, setModalVisible] = useState(false);
@@ -23,6 +36,11 @@ export default function TabIndexScreen() {
 
   const loadData = async () => {
     try {
+      const cachedDash = await SecureStore.getItemAsync('cached_dashboard');
+      if (cachedDash) {
+        setDashboardData(JSON.parse(cachedDash));
+      }
+
       const stored = await SecureStore.getItemAsync('userData');
       if (stored) {
         const user = JSON.parse(stored);
@@ -36,6 +54,7 @@ export default function TabIndexScreen() {
         const json = await res.json();
         if (json.success) {
           setDashboardData(json.dashboard);
+          await SecureStore.setItemAsync('cached_dashboard', JSON.stringify(json.dashboard));
         }
       }
     } catch (e) {
@@ -104,6 +123,7 @@ export default function TabIndexScreen() {
         });
 
         if (!authResult.success) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           setModalType('error');
           setModalTitle('Autenticación Requerida');
           setModalMessage('Debes validar tu huella digital para registrar asistencia en Home Office.');
@@ -137,6 +157,14 @@ export default function TabIndexScreen() {
       setRegistrandoHO(false);
 
       if (json.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        let tipo = json.tipo || 'asistencia';
+        if (tipo === 'comidaSalida') {
+          programarAlertaComida(45);
+        } else if (tipo === 'comidaEntrada') {
+          cancelarAlertaComida();
+        }
+
         setModalType('success');
         setModalTitle('¡Registro Exitoso!');
         setModalMessage(json.registro?.hora 
@@ -145,6 +173,7 @@ export default function TabIndexScreen() {
         setModalVisible(true);
         await loadData();
       } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setModalType('error');
         setModalTitle('Aviso de Asistencia');
         setModalMessage(json.motivo || json.message || 'No fue posible registrar tu asistencia en este momento.');
@@ -152,6 +181,7 @@ export default function TabIndexScreen() {
       }
     } catch (err: any) {
       setRegistrandoHO(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setModalType('error');
       setModalTitle('Error de Conexión');
       setModalMessage('No se pudo conectar con el servidor: ' + err.message);
@@ -178,7 +208,7 @@ export default function TabIndexScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView 
         style={styles.container} 
         showsVerticalScrollIndicator={false}
@@ -224,9 +254,17 @@ export default function TabIndexScreen() {
 
         {/* PROGRESO DE HOY (STEPPER) */}
         <View style={styles.card}>
-          <View style={[styles.rowBetween, { marginBottom: 15 }]}>
-            <Text style={styles.label}>PROGRESO DE HOY</Text>
-            <Text style={styles.label}>{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase()}</Text>
+          <View style={[styles.rowBetween, { marginBottom: 15, alignItems: 'center' }]}>
+            <View>
+              <Text style={styles.label}>PROGRESO DE HOY</Text>
+              <Text style={{ fontSize: 10, color: '#94a3b8', fontWeight: '600' }}>
+                {new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.relojBadge}>
+              <Ionicons name="time-outline" size={13} color="#0d6efd" style={{ marginRight: 4 }} />
+              <Text style={styles.relojTexto}>{horaActual}</Text>
+            </View>
           </View>
 
           <View style={styles.grid4}>
@@ -483,6 +521,21 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', padding: 20, marginBottom: 16 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between' },
   label: { fontSize: 12, fontWeight: '700', color: '#64748b', letterSpacing: 0.5 },
+  relojBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+  },
+  relojTexto: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0d6efd',
+  },
   grid4: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   progressBox: { flex: 1, alignItems: 'center', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, paddingVertical: 12, marginHorizontal: 3 },
   progressBoxActive: { borderColor: '#0d6efd', backgroundColor: '#eff6ff' },

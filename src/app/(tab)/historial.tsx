@@ -1,12 +1,23 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import * as SecureStore from 'expo-secure-store';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '../../config/api';
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const DIAS_SEMANA_COMPLETO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+// Función clasificadora para el semáforo
+const clasificarEstado = (estadoRaw?: string): 'puntual' | 'retardo' | 'falta' | 'neutro' => {
+  if (!estadoRaw) return 'neutro';
+  const e = estadoRaw.toLowerCase().trim();
+  if (e === 'retardo') return 'retardo';
+  if (e === 'falta' || e === 'inasistencia') return 'falta';
+  if (['normal', 'puntual', 'correcto', 'asistencia', 'completo'].includes(e)) return 'puntual';
+  return 'puntual';
+};
 
 export default function HistorialScreen() {
   const [historial, setHistorial] = useState<any[]>([]);
@@ -16,6 +27,27 @@ export default function HistorialScreen() {
   const [anioActual, setAnioActual] = useState(new Date().getFullYear());
   const [diaSeleccionado, setDiaSeleccionado] = useState<number>(new Date().getDate());
   const [mostrarListaCompleta, setMostrarListaCompleta] = useState(false);
+  const [filtroSeleccionado, setFiltroSeleccionado] = useState<'todos' | 'puntual' | 'retardo' | 'falta'>('todos');
+
+  // Alternar filtro y saltar automáticamente al primer día encontrado 
+  const toggleFiltro = (filtro: 'puntual' | 'retardo' | 'falta') => {
+    if (filtroSeleccionado === filtro) {
+      setFiltroSeleccionado('todos');
+    } else {
+      setFiltroSeleccionado(filtro);
+      const encontrados = historial.filter(h => clasificarEstado(h.estado) === filtro);
+      if (encontrados.length > 0 && encontrados[0].fecha) {
+        const dia = parseInt(encontrados[0].fecha.split('-')[2], 10);
+        if (!isNaN(dia)) setDiaSeleccionado(dia);
+      }
+    }
+  };
+
+  // Lista de incidencias según el filtro activo 
+  const incidenciasFiltradas = useMemo(() => {
+    if (filtroSeleccionado === 'todos') return [];
+    return historial.filter(h => clasificarEstado(h.estado) === filtroSeleccionado);
+  }, [historial, filtroSeleccionado]);
 
   const fetchHistorial = useCallback(async () => {
     setLoading(true);
@@ -88,16 +120,6 @@ export default function HistorialScreen() {
     return mapa;
   }, [historial]);
 
-  // Función clasificadora para el semáforo
-  const clasificarEstado = (estadoRaw?: string): 'puntual' | 'retardo' | 'falta' | 'neutro' => {
-    if (!estadoRaw) return 'neutro';
-    const e = estadoRaw.toLowerCase().trim();
-    if (e === 'retardo') return 'retardo';
-    if (e === 'falta' || e === 'inasistencia') return 'falta';
-    if (['normal', 'puntual', 'correcto', 'asistencia', 'completo'].includes(e)) return 'puntual';
-    return 'puntual';
-  };
-
   // Resumen del mes para los chips informativos
   const resumen = useMemo(() => {
     let puntuales = 0;
@@ -147,7 +169,7 @@ export default function HistorialScreen() {
   }, [diaSeleccionado, mapaDias, mesActual, anioActual]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       {/* HEADER */}
       <View style={styles.header}>
         <Ionicons name="calendar-outline" size={24} color="#0f172a" style={{ marginRight: 12 }} />
@@ -176,10 +198,40 @@ export default function HistorialScreen() {
           
           <View style={{ alignItems: 'center' }}>
             <Text style={styles.monthTitle}>{MESES[mesActual - 1]} {anioActual}</Text>
+                        {/* CHIPS INTERACTIVOS DE FILTRADO */}
             <View style={styles.summaryChipsRow}>
-              <Text style={[styles.chipText, { color: '#16a34a' }]}>● {resumen.puntuales} Puntuales</Text>
-              <Text style={[styles.chipText, { color: '#d97706' }]}>● {resumen.retardos} Retardos</Text>
-              <Text style={[styles.chipText, { color: '#dc2626' }]}>● {resumen.faltas} Faltas</Text>
+              <TouchableOpacity 
+                style={[
+                  styles.filterChip, 
+                  filtroSeleccionado === 'puntual' && styles.filterChipPuntualActive
+                ]}
+                onPress={() => toggleFiltro('puntual')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.chipText, { color: '#16a34a' }]}>● {resumen.puntuales} Puntuales</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[
+                  styles.filterChip, 
+                  filtroSeleccionado === 'retardo' && styles.filterChipRetardoActive
+                ]}
+                onPress={() => toggleFiltro('retardo')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.chipText, { color: '#d97706' }]}>● {resumen.retardos} Retardos</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[
+                  styles.filterChip, 
+                  filtroSeleccionado === 'falta' && styles.filterChipFaltaActive
+                ]}
+                onPress={() => toggleFiltro('falta')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.chipText, { color: '#dc2626' }]}>● {resumen.faltas} Faltas</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -230,6 +282,63 @@ export default function HistorialScreen() {
                 </View>
               </View>
             </View>
+
+            {/* LISTA DINÁMICA DE INCIDENCIAS FILTRADAS */}
+            {filtroSeleccionado !== 'todos' && (
+              <View style={styles.filterResultCard}>
+                <View style={styles.filterResultHeader}>
+                  <Text style={styles.filterResultTitle}>
+                    {filtroSeleccionado === 'puntual' && `Asistencias Puntuales (${incidenciasFiltradas.length})`}
+                    {filtroSeleccionado === 'retardo' && `Retardos Registrados (${incidenciasFiltradas.length})`}
+                    {filtroSeleccionado === 'falta' && `Faltas Registradas (${incidenciasFiltradas.length})`}
+                  </Text>
+                  <TouchableOpacity onPress={() => setFiltroSeleccionado('todos')}>
+                    <Text style={styles.clearFilterText}>Quitar filtro ✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {incidenciasFiltradas.length === 0 ? (
+                  <Text style={styles.emptyFilterText}>No hay registros con este estatus en este mes.</Text>
+                ) : (
+                  incidenciasFiltradas.map((item, idx) => {
+                    const diaNum = item.fecha ? parseInt(item.fecha.split('-')[2], 10) : 0;
+                    const esSeleccionado = diaNum === diaSeleccionado;
+                    return (
+                      <TouchableOpacity
+                        key={item.id || idx}
+                        style={[styles.incidenciaRow, esSeleccionado && styles.incidenciaRowActive]}
+                        onPress={() => {
+                          if (diaNum) setDiaSeleccionado(diaNum);
+                        }}
+                      >
+                        <View style={styles.incidenciaLeft}>
+                          <Text style={styles.incidenciaDia}>Día {diaNum}</Text>
+                          <Text style={styles.incidenciaFecha}>{item.fecha}</Text>
+                        </View>
+                        <View style={styles.incidenciaRight}>
+                          <Text style={styles.incidenciaHora}>{item.entrada || '--:--'}</Text>
+                          <View style={[
+                            styles.incidenciaBadge,
+                            filtroSeleccionado === 'puntual' && { backgroundColor: '#dcfce7' },
+                            filtroSeleccionado === 'retardo' && { backgroundColor: '#fef3c7' },
+                            filtroSeleccionado === 'falta' && { backgroundColor: '#fee2e2' },
+                          ]}>
+                            <Text style={[
+                              styles.miniBadgeText,
+                              filtroSeleccionado === 'puntual' && { color: '#166534' },
+                              filtroSeleccionado === 'retardo' && { color: '#b45309' },
+                              filtroSeleccionado === 'falta' && { color: '#991b1b' },
+                            ]}>
+                              {item.estado || filtroSeleccionado}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
+            )}
 
             {/* TARJETA DETALLE DEL DÍA SELECCIONADO */}
             <View style={styles.detailCard}>
@@ -543,5 +652,26 @@ const styles = StyleSheet.create({
   fullListDate: { fontSize: 14, fontWeight: 'bold', color: '#0f172a' },
   fullListTimes: { fontSize: 12, color: '#64748b', marginTop: 2 },
   miniBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  miniBadgeText: { fontSize: 11, fontWeight: 'bold' }
+  miniBadgeText: { fontSize: 11, fontWeight: 'bold' },
+
+  // Estilos del Filtro Interactivo de Incidencias
+  filterChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' },
+  filterChipPuntualActive: { backgroundColor: '#dcfce7', borderColor: '#16a34a' },
+  filterChipRetardoActive: { backgroundColor: '#fef3c7', borderColor: '#d97706' },
+  filterChipFaltaActive: { backgroundColor: '#fee2e2', borderColor: '#dc2626' },
+
+  filterResultCard: { backgroundColor: '#ffffff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
+  filterResultHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  filterResultTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  clearFilterText: { fontSize: 12, color: '#0d6efd', fontWeight: '600' },
+  emptyFilterText: { fontSize: 13, color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', paddingVertical: 12 },
+
+  incidenciaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10, marginBottom: 4 },
+  incidenciaRowActive: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
+  incidenciaLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  incidenciaDia: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  incidenciaFecha: { fontSize: 12, color: '#64748b' },
+  incidenciaRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  incidenciaHora: { fontSize: 13, fontWeight: '600', color: '#334155' },
+  incidenciaBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }
 });

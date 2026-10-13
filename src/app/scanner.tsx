@@ -5,11 +5,15 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { API_URL } from '../config/api';
 import { clearCachedPreflight, getCachedPreflight } from '../config/preflightCache';
 const BARCODE_SETTINGS = { barcodeTypes: ['qr' as const] };
+
+import * as Haptics from 'expo-haptics';
+import { programarAlertaComida, cancelarAlertaComida } from '@/services/notificationService'; 
 
 interface PreflightDetails {
   es_home_office: boolean;
@@ -78,6 +82,7 @@ export default function ScannerScreen() {
 
     // Si no se autoriza el escaneo (por red Wi-Fi o geocerca)
     if (!preflightRes.permitir_escanear) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       setValidatingPreflight(false);
       setCameraActive(false);
       setPreflightErrors(preflightRes.errores || [preflightRes.message || 'No cumples con las condiciones para escanear.']);
@@ -248,8 +253,14 @@ export default function ScannerScreen() {
       setLoading(false);
 
       if (json.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setModalType('success');
         let tipo = json.tipo || 'asistencia';
+        if (tipo === 'comidaSalida') {
+          programarAlertaComida(45);
+        } else if (tipo === 'comidaEntrada') {
+          cancelarAlertaComida();
+        }
         let context = 'Registro Home Office Exitoso';
         if (tipo === 'entrada') context = '¡Excelente inicio de jornada remota!';
         else if (tipo === 'comidaSalida') context = '¡Buen provecho, disfruta tu descanso!';
@@ -260,12 +271,14 @@ export default function ScannerScreen() {
         setModalMessage(`Registrado correctamente a las ${json.registro?.hora || ''} en modalidad Home Office.`);
         setResultModalVisible(true);
       } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setModalType('error');
         setModalMessage(json.motivo || json.message || 'No fue posible registrar asistencia remota.');
         setResultModalVisible(true);
       }
     } catch (e: any) {
       setLoading(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setModalType('error');
       setModalMessage('Error de red: ' + e.message);
       setResultModalVisible(true);
@@ -343,7 +356,15 @@ export default function ScannerScreen() {
       setLoading(false);
 
       if (json.success) {
+        const tipo = (json.tipo || json.message || '').toLowerCase();
+        if (tipo.includes('comida') && (tipo.includes('salida') || tipo.includes('comer') || tipo.includes('comidasalida'))) {
+          programarAlertaComida(45);
+        } else if (tipo.includes('regreso') || tipo.includes('volver') || tipo.includes('comidaentrada')) {
+          cancelarAlertaComida();
+        }
+
         setModalType('success');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         let msg = json.message || 'Asistencia registrada con éxito.';
         let context = 'Registro exitoso';
 
@@ -355,6 +376,7 @@ export default function ScannerScreen() {
         setModalContext(context);
         setResultModalVisible(true);
       } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         setModalType('error');
         setModalMessage(json.motivo || json.message || 'Ocurrió un error al registrar.');
         setResultModalVisible(true);
@@ -362,6 +384,7 @@ export default function ScannerScreen() {
 
     } catch (e: any) {
       setLoading(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setModalType('error');
       setModalMessage('No se pudo conectar con el servidor: ' + e.message);
       setResultModalVisible(true);

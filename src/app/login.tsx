@@ -15,6 +15,7 @@ import {
   Text, TextInput, TouchableOpacity,
   View
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { API_URL } from '../config/api';
 import { setCachedPreflight } from '../config/preflightCache';
 
@@ -113,6 +114,7 @@ export default function LoginScreen() {
         ]);
 
         if (loginRes.success) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           await SecureStore.setItemAsync('userToken', 'active_session');
           await SecureStore.setItemAsync('userData', JSON.stringify(loginRes.user));
 
@@ -142,12 +144,14 @@ export default function LoginScreen() {
 
           router.replace('/scanner' as any);
         } else {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           Alert.alert('Dispositivo no reconocido', loginRes.message);
           await SecureStore.deleteItemAsync('deviceKey');
           setHasSavedDeviceKey(false);
         }
       }
     } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Error', 'No se pudo conectar al servidor.');
     } finally {
       setLoading(false);
@@ -218,17 +222,26 @@ export default function LoginScreen() {
         })
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error('Respuesta no válida del servidor: ' + responseText.substring(0, 80));
+      }
 
       if (data.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setShowTotpModal(false);
         setTotpCode('');
         finalizaLogin(data.user);
       } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Alert.alert('Código incorrecto', data.message || 'El código no es válido o ha expirado.');
       }
     } catch (error: any) {
       console.log('Error al verificar 2FA:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Error de conexión', error?.message || 'No se pudo verificar el código con el servidor.');
     } finally {
       setLoading(false);
@@ -278,6 +291,7 @@ export default function LoginScreen() {
         const data = await response.json();
 
         if (data.success) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           await SecureStore.setItemAsync('deviceKey', newDeviceKey);
           setHasSavedDeviceKey(true);
           Alert.alert(
@@ -286,9 +300,11 @@ export default function LoginScreen() {
           );
           finalizaLogin(data.user || user);
         } else {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           Alert.alert('No se pudo vincular', data.message || 'Error al vincular el dispositivo.');
         }
       } else {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Alert.alert('Cancelado', 'Debes confirmar tu huella para vincular este teléfono.');
       }
     } catch (error) {
