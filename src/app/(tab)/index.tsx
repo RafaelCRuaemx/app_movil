@@ -1,32 +1,32 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as Location from 'expo-location';
+import { useLocation } from '@/hooks/useLocation';
+import { useBiometrics } from '@/hooks/useBiometrics';
+import { useUser } from '@/hooks/useUser';
+import { useDashboard } from '@/hooks/useDashboard';
 import { router, useFocusEffect } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { API_URL } from '../../config/api';
 import * as Haptics from 'expo-haptics';
-import { programarAlertaComida, cancelarAlertaComida } from '@/services/notificationService';
 
 export default function TabIndexScreen() {
-  const [userData, setUserData] = useState<any>(null);
-  const [dashboardData, setDashboardData] = useState<any>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const { user: userData, logout: handleLogout } = useUser();
+  const { obtenerUbicacion } = useLocation();
+  const { autenticar } = useBiometrics();
+  const {
+    dashboardData,
+    horaActual,
+    refreshing,
+    registrandoHO,
+    loadData,
+    onRefresh,
+    registrarHomeOffice,
+    userName,
+    getInitials,
+    getIconForStep,
+  } = useDashboard(userData);
+
   const [mostrarDetalles, setMostrarDetalles] = useState(false);
-  const [registrandoHO, setRegistrandoHO] = useState(false);
-
-  // Reloj digital en vivo
-  const [horaActual, setHoraActual] = useState(new Date().toLocaleTimeString('es-MX'));
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setHoraActual(new Date().toLocaleTimeString('es-MX'));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Estados para modal elegante de confirmación / avisos
   const [modalVisible, setModalVisible] = useState(false);
@@ -34,177 +34,42 @@ export default function TabIndexScreen() {
   const [modalTitle, setModalTitle] = useState('');
   const [modalMessage, setModalMessage] = useState('');
 
-  const loadData = async () => {
-    try {
-      const cachedDash = await SecureStore.getItemAsync('cached_dashboard');
-      if (cachedDash) {
-        setDashboardData(JSON.parse(cachedDash));
-      }
-
-      const stored = await SecureStore.getItemAsync('userData');
-      if (stored) {
-        const user = JSON.parse(stored);
-        setUserData(user);
-        
-        const res = await fetch(`${API_URL}/dashboard_app.php`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ usuario_id: user.id })
-        });
-        const json = await res.json();
-        if (json.success) {
-          setDashboardData(json.dashboard);
-          await SecureStore.setItemAsync('cached_dashboard', JSON.stringify(json.dashboard));
-        }
-      }
-    } catch (e) {
-      console.log('Error fetch dashboard:', e);
-    }
-  };
-
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [])
+    }, [loadData])
   );
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  };
-
-  const handleLogout = () => {
-    Alert.alert(
-      "Cerrar sesión",
-      "¿Estás seguro de que deseas cerrar tu sesión actual?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        { 
-          text: "Cerrar sesión", 
-          style: "destructive", 
-          onPress: async () => {
-            await SecureStore.deleteItemAsync('userToken');
-            await SecureStore.deleteItemAsync('userData');
-            router.replace('/login' as any);
-          } 
-        }
-      ]
-    );
-  };
 
   const registrarHomeOfficeDirecto = async () => {
     if (!userData?.id) return;
     const pasoActual = dashboardData?.hero_btn_text?.toLowerCase() || 'asistencia';
 
     // Iniciar captura de ubicación en paralelo mientras el usuario coloca su huella
-    const locPromise = (async () => {
-      try {
-        let { status } = await Location.getForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const lastLoc = await Location.getLastKnownPositionAsync();
-          if (lastLoc) return lastLoc;
-          return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        }
-      } catch (e) {}
-      return null;
-    })();
+    const locPromise = obtenerUbicacion();
 
     // Validación obligatoria con huella digital / Face ID en Home Office
-    try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-
-      if (hasHardware && isEnrolled) {
-        const authResult = await LocalAuthentication.authenticateAsync({
-          promptMessage: `Confirma tu identidad para registrar ${pasoActual}`,
-          cancelLabel: 'Cancelar',
-          disableDeviceFallback: false,
-        });
-
-        if (!authResult.success) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          setModalType('error');
-          setModalTitle('Autenticación Requerida');
-          setModalMessage('Debes validar tu huella digital para registrar asistencia en Home Office.');
-          setModalVisible(true);
-          return;
-        }
-      }
-    } catch (e) {
-      console.log('Error biometric:', e);
-    }
-
-    setRegistrandoHO(true);
-    try {
-      const loc = await locPromise;
-      const lat = loc?.coords?.latitude ?? null;
-      const lon = loc?.coords?.longitude ?? null;
-      const acc = loc?.coords?.accuracy ?? null;
-
-      const res = await fetch(`${API_URL}/registrar_asistencia_home_office_app.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          usuario_id: userData.id,
-          lat,
-          lon,
-          gps_acc: acc
-        })
-      });
-
-      const json = await res.json();
-      setRegistrandoHO(false);
-
-      if (json.success) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        let tipo = json.tipo || 'asistencia';
-        if (tipo === 'comidaSalida') {
-          programarAlertaComida(45);
-        } else if (tipo === 'comidaEntrada') {
-          cancelarAlertaComida();
-        }
-
-        setModalType('success');
-        setModalTitle('¡Registro Exitoso!');
-        setModalMessage(json.registro?.hora 
-          ? `Tu marcaje fue registrado correctamente a las ${json.registro.hora} en modalidad remota.`
-          : 'Asistencia en modalidad Home Office confirmada con éxito.');
-        setModalVisible(true);
-        await loadData();
-      } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setModalType('error');
-        setModalTitle('Aviso de Asistencia');
-        setModalMessage(json.motivo || json.message || 'No fue posible registrar tu asistencia en este momento.');
-        setModalVisible(true);
-      }
-    } catch (err: any) {
-      setRegistrandoHO(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    const ok = await autenticar(`Confirma tu identidad para registrar ${pasoActual}`);
+    if (!ok) {
       setModalType('error');
-      setModalTitle('Error de Conexión');
-      setModalMessage('No se pudo conectar con el servidor: ' + err.message);
+      setModalTitle('Autenticación Requerida');
+      setModalMessage('Debes validar tu huella digital para registrar asistencia en Home Office.');
       setModalVisible(true);
+      return;
     }
-  };
 
-  const userName = userData?.nombre ? userData.nombre.split(' ')[0] : 'Colaborador';
-  const getInitials = (name: string) => {
-    if (!name) return '';
-    const parts = name.split(' ');
-    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  };
+    const loc = await locPromise;
+    const res = await registrarHomeOffice(loc);
 
-  const getIconForStep = (step: string) => {
-    switch (step) {
-      case 'entrada': return 'sunny-outline';
-      case 'salida_comida': return 'cafe-outline';
-      case 'regreso_comida': return 'fast-food-outline';
-      case 'salida': return 'exit-outline';
-      default: return 'qr-code-outline';
-    }
+    Haptics.notificationAsync(
+      res.success 
+        ? Haptics.NotificationFeedbackType.Success 
+        : Haptics.NotificationFeedbackType.Error
+    );
+
+    setModalType(res.success ? 'success' : 'error');
+    setModalTitle(res.title);
+    setModalMessage(res.message);
+    setModalVisible(true);
   };
 
   return (

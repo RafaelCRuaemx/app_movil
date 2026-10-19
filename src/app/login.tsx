@@ -1,324 +1,38 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as Device from 'expo-device';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as Location from 'expo-location';
-import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
   StyleSheet,
-  Text, TextInput, TouchableOpacity,
-  View
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
-import { API_URL } from '../config/api';
-import { setCachedPreflight } from '../config/preflightCache';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function LoginScreen() {
-  const [correo, setCorreo] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false); 
-  const [loading, setLoading] = useState(false);
-  const [isBiometricSupported, setIsBiometricSupported] = useState(false);
-  const [hasSavedDeviceKey, setHasSavedDeviceKey] = useState(false);
-
-  const [showBiometricPrompt, setShowBiometricPrompt] = useState(false);
-  const [tempAuthData, setTempAuthData] = useState<any>(null);
-
-  // Nuevos estados para Google Authenticator (Nivel Administrativo: Admin, RH, Gerente)
-  const [showTotpModal, setShowTotpModal] = useState(false);
-  const [totpCode, setTotpCode] = useState('');
-  const [totpUserId, setTotpUserId] = useState<number | null>(null);
-
-  useEffect(() => {
-    checkBiometrics();
-  }, []);
-
-  const checkBiometrics = async () => {
-    const hardware = await LocalAuthentication.hasHardwareAsync();
-    const enrolled = await LocalAuthentication.isEnrolledAsync();
-    setIsBiometricSupported(hardware && enrolled);
-    
-    const savedKey = await SecureStore.getItemAsync('deviceKey');
-    if (savedKey) {
-      setHasSavedDeviceKey(true);
-      // Auto-disparar la huella inmediatamente al abrir la app
-      setTimeout(() => {
-        handleBiometricLogin(savedKey);
-      }, 500);
-    }
-  };
-
-  const generateDeviceKey = () => {
-    return 'movil_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-  };
-
-  const getDeviceDisplayName = () => {
-    const brand = Device.brand || Device.manufacturer || '';
-    const model = Device.modelName || Device.deviceName || 'Dispositivo';
-    const os = Platform.OS === 'ios' ? 'iOS' : 'Android';
-    const osVersion = Device.osVersion ? ` ${Device.osVersion}` : '';
-    const full = `${brand} ${model} (${os}${osVersion})`.trim();
-    return full.length > 0 ? full : (Platform.OS === 'ios' ? 'iPhone' : 'Android');
-  };
-
-  const handleBiometricLogin = async (keyOverride?: string) => {
-    // Iniciar captura de GPS en segundo plano al mismo tiempo que se muestra la huella
-    const locPromise = (async () => {
-      try {
-        let { status } = await Location.getForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          const req = await Location.requestForegroundPermissionsAsync();
-          status = req.status;
-        }
-        if (status === 'granted') {
-          const lastLoc = await Location.getLastKnownPositionAsync();
-          if (lastLoc && (Date.now() - lastLoc.timestamp < 30000)) {
-            return lastLoc;
-          }
-          return await Promise.race([
-            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-            new Promise<Location.LocationObject | null>((resolve) => setTimeout(() => resolve(lastLoc || null), 2000))
-          ]);
-        }
-      } catch (e) {
-        // Silencioso
-      }
-      return null;
-    })();
-
-    try {
-      const authResult = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Usa tu huella para iniciar sesión',
-        cancelLabel: 'Cancelar',
-        disableDeviceFallback: true,
-      });
-
-      if (authResult.success) {
-        setLoading(true);
-        const deviceKey = keyOverride && typeof keyOverride === 'string' ? keyOverride : await SecureStore.getItemAsync('deviceKey');
-        
-        // Ejecutar login biométrico y resolver GPS en paralelo
-        const [loginRes, loc] = await Promise.all([
-          fetch(`${API_URL}/login_biometrico_app.php`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ device_key: deviceKey })
-          }).then(r => r.json()),
-          locPromise
-        ]);
-
-        if (loginRes.success) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          await SecureStore.setItemAsync('userToken', 'active_session');
-          await SecureStore.setItemAsync('userData', JSON.stringify(loginRes.user));
-
-          // Si obtuvimos ubicación y usuario, ejecutar validación de pre-vuelo anticipadamente
-          if (loc && loginRes.user?.id) {
-            try {
-              const preflightRes = await fetch(`${API_URL}/validar_prevuelo_app.php`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  usuario_id: loginRes.user.id,
-                  lat: loc.coords.latitude,
-                  lon: loc.coords.longitude
-                })
-              }).then(r => r.json());
-
-              // Guardar en caché para que /scanner la consuma al instante con 0ms de espera
-              setCachedPreflight({
-                timestamp: Date.now(),
-                location: loc,
-                preflightRes
-              });
-            } catch (errPrevuelo) {
-              console.log('Error preflight anticipado:', errPrevuelo);
-            }
-          }
-
-          router.replace('/scanner' as any);
-        } else {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          Alert.alert('Dispositivo no reconocido', loginRes.message);
-          await SecureStore.deleteItemAsync('deviceKey');
-          setHasSavedDeviceKey(false);
-        }
-      }
-    } catch (error) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', 'No se pudo conectar al servidor.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleNormalLogin = async () => {
-    if (!correo || !password) {
-      Alert.alert('Aviso', 'Por favor ingresa tu correo y contraseña.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/login_app.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ correo, password })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        // Caso 1: Usuario con nivel Administrativo (Admin, RH, Gerente) -> Verificación con Google Authenticator
-        if (data.requiere_2fa) {
-          setTotpUserId(data.usuario_id);
-          setTotpCode('');
-          setShowTotpModal(true);
-          return;
-        }
-
-        // Caso 2: Colaborador operativo -> Requiere dispositivo móvil con huella digital
-        if (!isBiometricSupported) {
-          Alert.alert(
-            'Sensor biométrico no detectado',
-            'Para la seguridad del checador de asistencia, este dispositivo requiere tener sensor de huella dactilar o Face ID activo.'
-          );
-          return;
-        }
-
-        // Credenciales válidas de primer registro: Desplegar vinculación obligatoria
-        setTempAuthData({ user: data.user, email: correo, pass: password });
-        setShowBiometricPrompt(true);
-      } else {
-        Alert.alert('Acceso Denegado', data.message || 'Error desconocido.');
-      }
-    } catch (error) {
-      Alert.alert('Error de red', 'No se pudo conectar con el servidor.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerificarTotp = async () => {
-    if (totpCode.trim().length !== 6) {
-      Alert.alert('Aviso', 'El código de Google Authenticator debe tener exactamente 6 dígitos.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/verificar_2fa_app.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          usuario_id: totpUserId,
-          codigo_totp: totpCode.trim()
-        })
-      });
-
-      const responseText = await response.text();
-      let data: any;
-      try {
-        data = JSON.parse(responseText);
-      } catch (e) {
-        throw new Error('Respuesta no válida del servidor: ' + responseText.substring(0, 80));
-      }
-
-      if (data.success) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setShowTotpModal(false);
-        setTotpCode('');
-        finalizaLogin(data.user);
-      } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert('Código incorrecto', data.message || 'El código no es válido o ha expirado.');
-      }
-    } catch (error: any) {
-      console.log('Error al verificar 2FA:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error de conexión', error?.message || 'No se pudo verificar el código con el servidor.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const confirmarVinculacion = () => {
-    setShowBiometricPrompt(false);
-    if (tempAuthData) {
-      linkDevice(tempAuthData.user, tempAuthData.email, tempAuthData.pass);
-    }
-  };
-
-  const cancelarVinculacion = () => {
-    setShowBiometricPrompt(false);
-    setTempAuthData(null);
-    Alert.alert(
-      'Vinculación Requerida',
-      'Por seguridad institucional, es obligatorio vincular tu huella para poder utilizar el checador en este dispositivo.'
-    );
-  };
-
-  const linkDevice = async (user: any, email: string, pass: string) => {
-    try {
-      const authResult = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Confirma tu huella para vincular este equipo exclusivamente a tu cuenta',
-        cancelLabel: 'Cancelar',
-        disableDeviceFallback: true,
-      });
-
-      if (authResult.success) {
-        setLoading(true);
-        const newDeviceKey = generateDeviceKey();
-        const deviceName = getDeviceDisplayName();
-        
-        const response = await fetch(`${API_URL}/registrar_dispositivo_app.php`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            correo: email, 
-            password: pass, 
-            device_key: newDeviceKey,
-            nombre_device: deviceName
-          })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          await SecureStore.setItemAsync('deviceKey', newDeviceKey);
-          setHasSavedDeviceKey(true);
-          Alert.alert(
-            '¡Dispositivo Vinculado!',
-            `Tu equipo (${deviceName}) ha quedado registrado exitosamente como tu dispositivo oficial de asistencia.`
-          );
-          finalizaLogin(data.user || user);
-        } else {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          Alert.alert('No se pudo vincular', data.message || 'Error al vincular el dispositivo.');
-        }
-      } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert('Cancelado', 'Debes confirmar tu huella para vincular este teléfono.');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'No se pudo conectar con el servidor al vincular el dispositivo.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const finalizaLogin = async (user: any) => {
-    await SecureStore.setItemAsync('userToken', 'active_session');
-    await SecureStore.setItemAsync('userData', JSON.stringify(user));
-    router.replace('/scanner' as any);
-  };
+  const {
+    correo,
+    setCorreo,
+    password,
+    setPassword,
+    showPassword,
+    setShowPassword,
+    loading,
+    hasSavedDeviceKey,
+    showBiometricPrompt,
+    showTotpModal,
+    totpCode,
+    setTotpCode,
+    handleBiometricLogin,
+    handleNormalLogin,
+    handleVerificarTotp,
+    confirmarVinculacion,
+    cancelarVinculacion,
+    cerrarTotpModal,
+  } = useAuth();
 
 
   return (
@@ -443,10 +157,7 @@ export default function LoginScreen() {
         animationType="fade"
         transparent={true}
         visible={showTotpModal}
-        onRequestClose={() => {
-          setShowTotpModal(false);
-          setTotpCode('');
-        }}
+        onRequestClose={cerrarTotpModal}
       >
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -489,10 +200,7 @@ export default function LoginScreen() {
 
             <TouchableOpacity 
               style={styles.modalBtnSecondary} 
-              onPress={() => {
-                setShowTotpModal(false);
-                setTotpCode('');
-              }}
+              onPress={cerrarTotpModal}
               disabled={loading}
             >
               <Text style={styles.modalBtnSecondaryText}>Cancelar</Text>

@@ -1,28 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as Location from 'expo-location';
-import * as LocalAuthentication from 'expo-local-authentication';
+import { CameraView } from 'expo-camera';
+import { useLocation } from '@/hooks/useLocation';
+import { useBiometrics } from '@/hooks/useBiometrics';
+import { useUser } from '@/hooks/useUser';
+import { useDashboard } from '@/hooks/useDashboard';
+import { useQRScanner } from '@/hooks/useQRScanner';
 import { router, useFocusEffect } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { API_URL } from '../config/api';
-import { clearCachedPreflight, getCachedPreflight } from '../config/preflightCache';
-const BARCODE_SETTINGS = { barcodeTypes: ['qr' as const] };
-
 import * as Haptics from 'expo-haptics';
-import { programarAlertaComida, cancelarAlertaComida } from '@/services/notificationService'; 
 
-interface PreflightDetails {
-  es_home_office: boolean;
-  oficina_nombre?: string;
-  radio_permitido?: number;
-  distancia_metros?: number | null;
-  red_autorizada?: boolean;
-  geocerca_autorizada?: boolean;
-}
+const BARCODE_SETTINGS = { barcodeTypes: ['qr' as const] };
 
 export default function ScannerScreen() {
   const [isFocused, setIsFocused] = useState(true);
@@ -36,370 +25,73 @@ export default function ScannerScreen() {
     }, [])
   );
 
-  const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [validatingPreflight, setValidatingPreflight] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [locationError, setLocationError] = useState<string | null>(null);
-  const [userData, setUserData] = useState<any>(null);
+  const { user: userData } = useUser();
+  const { coordenadas: location, error: locationError, obtenerUbicacion } = useLocation();
+  const { autenticar } = useBiometrics();
+  const { registrarHomeOffice } = useDashboard(userData);
 
-  // Estados de Pre-vuelo
-  const [preflightData, setPreflightData] = useState<PreflightDetails | null>(null);
-  const [preflightFailedModal, setPreflightFailedModal] = useState(false);
-  const [preflightErrors, setPreflightErrors] = useState<string[]>([]);
-  const [isHomeOffice, setIsHomeOffice] = useState(false);
+  const {
+    cameraActive,
+    setCameraActive,
+    scanned,
+    setScanned,
+    loading,
+    validatingPreflight,
+    preflightData,
+    preflightErrors,
+    preflightFailedModal,
+    setPreflightFailedModal,
+    isHomeOffice,
+    resultModalVisible,
+    setResultModalVisible,
+    modalType,
+    setModalType,
+    modalMessage,
+    setModalMessage,
+    modalContext,
+    setModalContext,
+    validarYIniciarCamara,
+    handleBarCodeScanned,
+    retryScan,
+  } = useQRScanner(userData, obtenerUbicacion);
 
-  // Modal de resultado de escaneo
-  const [resultModalVisible, setResultModalVisible] = useState(false);
-  const [modalType, setModalType] = useState<'success' | 'error'>('success');
-  const [modalMessage, setModalMessage] = useState('');
-  const [modalContext, setModalContext] = useState(''); 
-
-  // 1. Cargar usuario y ejecutar automáticamente la validación de entorno
-  useEffect(() => {
-    const initScanner = async () => {
-      const stored = await SecureStore.getItemAsync('userData');
-      if (stored) {
-        const parsedUser = JSON.parse(stored);
-        setUserData(parsedUser);
-        //  Dispara la validación de Wi-Fi, GPS y apertura de cámara en automático
-        validarYIniciarCamara(parsedUser);
-      }
-    };
-    initScanner();
-  }, []);
-
-  // Procesa el resultado de validación (usado tanto por caché anticipado como por validación en vivo)
-  const procesarResultadoPreflight = async (preflightRes: any) => {
-    if (preflightRes.es_home_office) {
-      setIsHomeOffice(true);
-      setValidatingPreflight(false);
-      setCameraActive(false);
-      return;
-    }
-
-    // Si no se autoriza el escaneo (por red Wi-Fi o geocerca)
-    if (!preflightRes.permitir_escanear) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      setValidatingPreflight(false);
-      setCameraActive(false);
-      setPreflightErrors(preflightRes.errores || [preflightRes.message || 'No cumples con las condiciones para escanear.']);
-      setPreflightData(preflightRes.detalles || null);
-      setPreflightFailedModal(true);
-      return;
-    }
-
-    // 3. Si las validaciones fueron exitosas, verificar permisos de cámara y activar
-    setPreflightData(preflightRes.detalles || null);
-
-    if (!permission?.granted) {
-      const { status: camStatus } = await requestPermission();
-      if (camStatus !== 'granted') {
-        setValidatingPreflight(false);
-        Alert.alert('Aviso', 'Se requieren permisos de cámara para poder escanear el QR.');
-        return;
-      }
-    }
-
-    setValidatingPreflight(false);
-    setCameraActive(true);
-    setScanned(false);
-  };
-
-  // Validación de Pre-Vuelo antes de encender la cámara
-  const validarYIniciarCamara = async (userParam?: any) => {
-    const user = userParam || userData;
-    if (!user?.id) {
-      Alert.alert('Error', 'No se encontró la sesión de usuario activa.');
-      return;
-    }
-
-    // Si la validación ya fue pre-cargada mientras se autenticaba la huella, consumirla de inmediato (0ms de espera)
-    const cached = getCachedPreflight();
-    if (cached) {
-      clearCachedPreflight();
-      if (cached.location) setLocation(cached.location);
-      await procesarResultadoPreflight(cached.preflightRes);
-      return;
-    }
-
-    setValidatingPreflight(true);
-    setLocationError(null);
-
-    try {
-      // 1. Verificar permiso sin invocar diálogo nativo si ya fue otorgado
-      let { status } = await Location.getForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        const req = await Location.requestForegroundPermissionsAsync();
-        status = req.status;
-      }
-
-      if (status !== 'granted') {
-        setValidatingPreflight(false);
-        setLocationError('Permiso de ubicación GPS denegado.');
-        Alert.alert(
-          'Ubicación requerida',
-          'Es indispensable otorgar permiso de ubicación para verificar que estás dentro del rango de la oficina antes de abrir la cámara.'
-        );
-        return;
-      }
-
-      // 2. Adquisición ultra-rápida de GPS (prioriza última posición conocida en ~30ms)
-      let loc = location;
-      const ahora = Date.now();
-
-      // Si ya teníamos una posición reciente en memoria (menos de 20 seg), reutilizarla de inmediato
-      if (!loc || (ahora - loc.timestamp > 20000)) {
-        try {
-          const lastKnown = await Location.getLastKnownPositionAsync();
-          if (lastKnown && (ahora - lastKnown.timestamp < 30000)) {
-            loc = lastKnown;
-          } else {
-            // Si no hay posición reciente en caché, obtenerla con carrera y timeout de 3.5s
-            const freshPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-            const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
-            const fresh = await Promise.race([freshPromise, timeoutPromise]);
-            loc = fresh || lastKnown;
-          }
-        } catch (eGps) {
-          // Fallback a posición en caché si existía
-        }
-      }
-
-      // Si aún no hay posición en hardware, último intento directo
-      if (!loc) {
-        loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      }
-
-      setLocation(loc);
-
-      // 3. Ejecutar validación de pre-vuelo con el backend
-      const res = await fetch(`${API_URL}/validar_prevuelo_app.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          usuario_id: user.id,
-          lat: loc?.coords.latitude,
-          lon: loc?.coords.longitude
-        })
-      });
-
-      const responseText = await res.text();
-      let preflightRes: any;
-      try {
-        preflightRes = JSON.parse(responseText);
-      } catch (e) {
-        throw new Error('Respuesta inválida del servidor: ' + responseText.substring(0, 80));
-      }
-
-      await procesarResultadoPreflight(preflightRes);
-
-    } catch (error: any) {
-      setValidatingPreflight(false);
-      Alert.alert('Error de conexión', 'No se pudo validar el estado de red y geocerca: ' + error.message);
-    }
-  };
+  const [loadingHO, setLoadingHO] = useState(false);
 
   // Registro directo en modalidad Home Office con huella digital (sin QR)
   const registrarHomeOfficeDirecto = async () => {
     if (!userData?.id) return;
 
     // Validación obligatoria con huella digital / Face ID en Home Office
-    try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-
-      if (hasHardware && isEnrolled) {
-        const authResult = await LocalAuthentication.authenticateAsync({
-          promptMessage: 'Usa tu huella para registrar asistencia en Home Office',
-          cancelLabel: 'Cancelar',
-          disableDeviceFallback: false,
-        });
-
-        if (!authResult.success) {
-          Alert.alert('Autenticación requerida', 'Debes validar tu huella digital para registrar asistencia en Home Office.');
-          return;
-        }
-      }
-    } catch (e) {
-      console.log('Error biometric:', e);
-    }
-
-    setLoading(true);
-
-    let currentLocation = location;
-    if (!currentLocation) {
-      try {
-        currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        setLocation(currentLocation);
-      } catch (e) {}
-    }
-
-    try {
-      const res = await fetch(`${API_URL}/registrar_asistencia_home_office_app.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          usuario_id: userData.id,
-          lat: currentLocation?.coords.latitude,
-          lon: currentLocation?.coords.longitude,
-          gps_acc: currentLocation?.coords.accuracy
-        })
-      });
-
-      const json = await res.json();
-      setLoading(false);
-
-      if (json.success) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setModalType('success');
-        let tipo = json.tipo || 'asistencia';
-        if (tipo === 'comidaSalida') {
-          programarAlertaComida(45);
-        } else if (tipo === 'comidaEntrada') {
-          cancelarAlertaComida();
-        }
-        let context = 'Registro Home Office Exitoso';
-        if (tipo === 'entrada') context = '¡Excelente inicio de jornada remota!';
-        else if (tipo === 'comidaSalida') context = '¡Buen provecho, disfruta tu descanso!';
-        else if (tipo === 'comidaEntrada') context = '¡Bienvenido de vuelta a tus labores!';
-        else if (tipo === 'salida') context = 'Jornada remota finalizada. ¡Buen descanso!';
-
-        setModalContext(context);
-        setModalMessage(`Registrado correctamente a las ${json.registro?.hora || ''} en modalidad Home Office.`);
-        setResultModalVisible(true);
-      } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setModalType('error');
-        setModalMessage(json.motivo || json.message || 'No fue posible registrar asistencia remota.');
-        setResultModalVisible(true);
-      }
-    } catch (e: any) {
-      setLoading(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setModalType('error');
-      setModalMessage('Error de red: ' + e.message);
-      setResultModalVisible(true);
-    }
-  };
-
-  const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
-    if (scanned || loading) return;
-    setScanned(true);
-    setLoading(true);
-
-    let currentLocation = location;
-    if (!currentLocation) {
-      try {
-        currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        setLocation(currentLocation);
-      } catch (e) {}
-    }
-
-    if (!currentLocation) {
-      setLoading(false);
-      setModalType('error');
-      setModalMessage('Aún no hemos obtenido tu ubicación GPS. Por favor reintenta.');
-      setResultModalVisible(true);
+    const ok = await autenticar('Usa tu huella para registrar asistencia en Home Office');
+    if (!ok) {
+      Alert.alert('Autenticación requerida', 'Debes validar tu huella digital para registrar asistencia en Home Office.');
       return;
     }
 
-    try {
-      const cleanData = (data || '').trim();
-      let qrPayload: any;
-      try {
-        qrPayload = JSON.parse(cleanData);
-      } catch (e) {
-        setLoading(false);
-        setModalType('error');
-        setModalMessage(`El código QR no es válido para este sistema.\nLeído: ${cleanData}`);
-        setResultModalVisible(true);
-        return;
-      }
-
-      let o = qrPayload.o !== undefined ? qrPayload.o : qrPayload.oficina_id;
-      let t = qrPayload.t !== undefined ? qrPayload.t : qrPayload.totp;
-
-      if (o === undefined || !t) {
-        setLoading(false);
-        setModalType('error');
-        setModalMessage(`QR incompleto o no reconocido.\nContenido: ${cleanData}`);
-        setResultModalVisible(true);
-        return;
-      }
-
-      const res = await fetch(`${API_URL}/registrar_asistencia_app.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          usuario_id: userData?.id,
-          qr: cleanData,
-          qr_payload: cleanData,
-          lat: currentLocation.coords.latitude,
-          latitud: currentLocation.coords.latitude,
-          lon: currentLocation.coords.longitude,
-          longitud: currentLocation.coords.longitude,
-          gps_acc: currentLocation.coords.accuracy
-        })
-      });
-
-      const responseText = await res.text();
-      let json;
-      try {
-        json = JSON.parse(responseText);
-      } catch(e) {
-        throw new Error('Respuesta del servidor no es JSON válido: ' + responseText.substring(0, 100));
-      }
-
-      setLoading(false);
-
-      if (json.success) {
-        const tipo = (json.tipo || json.message || '').toLowerCase();
-        if (tipo.includes('comida') && (tipo.includes('salida') || tipo.includes('comer') || tipo.includes('comidasalida'))) {
-          programarAlertaComida(45);
-        } else if (tipo.includes('regreso') || tipo.includes('volver') || tipo.includes('comidaentrada')) {
-          cancelarAlertaComida();
-        }
-
-        setModalType('success');
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        let msg = json.message || 'Asistencia registrada con éxito.';
-        let context = 'Registro exitoso';
-
-        if (msg.toLowerCase().includes('entrada')) context = '¡Excelente inicio de jornada!';
-        else if (msg.toLowerCase().includes('comer') || msg.toLowerCase().includes('comida')) context = '¡Buen provecho, disfruta tu descanso!';
-        else if (msg.toLowerCase().includes('salida')) context = 'Jornada finalizada. ¡Buen descanso!';
-        
-        setModalMessage(msg);
-        setModalContext(context);
-        setResultModalVisible(true);
-      } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        setModalType('error');
-        setModalMessage(json.motivo || json.message || 'Ocurrió un error al registrar.');
-        setResultModalVisible(true);
-      }
-
-    } catch (e: any) {
-      setLoading(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setModalType('error');
-      setModalMessage('No se pudo conectar con el servidor: ' + e.message);
-      setResultModalVisible(true);
+    setLoadingHO(true);
+    let currentLocation = location;
+    if (!currentLocation) {
+      currentLocation = await obtenerUbicacion();
     }
+
+    const res = await registrarHomeOffice(currentLocation);
+    setLoadingHO(false);
+
+    Haptics.notificationAsync(
+      res.success 
+        ? Haptics.NotificationFeedbackType.Success 
+        : Haptics.NotificationFeedbackType.Error
+    );
+
+    setModalType(res.success ? 'success' : 'error');
+    setModalContext(res.title);
+    setModalMessage(res.message);
+    setResultModalVisible(true);
   };
 
   const closeSuccess = () => {
     setResultModalVisible(false);
     router.replace('/(tab)/' as any);
-  };
-
-  const retryScan = () => {
-    setResultModalVisible(false);
-    setScanned(false);
-    setCameraActive(true);
   };
 
   return (
@@ -547,7 +239,7 @@ export default function ScannerScreen() {
           <Text style={[styles.footerText, { color: '#dc2626' }]}>{locationError}</Text>
         ) : location ? (
           <Text style={[styles.footerText, { color: '#16a34a' }]}>
-            GPS Activo ({location.coords.accuracy?.toFixed(0)}m de precisión)
+            GPS Activo ({location.accuracy?.toFixed(0)}m de precisión)
           </Text>
         ) : (
           <Text style={styles.footerText}>Conéctate a la red Wi-Fi de la oficina y mantén tu GPS encendido</Text>

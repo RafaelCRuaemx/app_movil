@@ -1,194 +1,21 @@
+import { useUser } from '@/hooks/useUser';
+import { usePerfil } from '@/hooks/usePerfil';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { API_URL } from '../../config/api';
-
 export default function PerfilScreen() {
-  const [perfilData, setPerfilData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  const fetchPerfil = async () => {
-    setLoading(true);
-    try {
-      const storedData = await SecureStore.getItemAsync('userData');
-      if (storedData) {
-        const user = JSON.parse(storedData);
-        const res = await fetch(`${API_URL}/perfil_app.php`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ usuario_id: user.id })
-        });
-        const json = await res.json();
-        if (json.success) {
-          setPerfilData(json.perfil);
-        }
-      }
-    } catch (e) {
-      console.log('Error fetching profile:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchPerfil();
-  }, []);
-
-  const handleLogout = () => {
-    Alert.alert(
-      "Cerrar sesión",
-      "¿Estás seguro de que deseas cerrar tu sesión actual?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        { 
-          text: "Cerrar sesión", 
-          style: "destructive", 
-          onPress: async () => {
-            await SecureStore.deleteItemAsync('userToken');
-            await SecureStore.deleteItemAsync('userData');
-            router.replace('/login' as any);
-          } 
-        }
-      ]
-    );
-  };
-
-  const handleAvatarPress = () => {
-    Alert.alert(
-      "Foto de perfil",
-      "¿Qué deseas hacer?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        { text: "Tomar foto", onPress: () => pickImage(true) },
-        { text: "Elegir de galería", onPress: () => pickImage(false) },
-        ...(perfilData?.foto_perfil ? [{ text: "Eliminar foto", onPress: deleteImage, style: 'destructive' as const }] : [])
-      ]
-    );
-  };
-
-  const pickImage = async (fromCamera: boolean) => {
-    try {
-      let result;
-      if (fromCamera) {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') return Alert.alert("Error", "Se requiere permiso de cámara");
-        result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'],
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 0.7,
-          base64: true,
-        });
-      } else {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') return Alert.alert("Error", "Se requiere permiso de galería");
-        result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 0.7,
-          base64: true,
-        });
-      }
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        uploadImage(result.assets[0]);
-      }
-    } catch (e: any) {
-      console.log('Error picker:', e);
-      Alert.alert("Error", "No se pudo seleccionar la imagen: " + (e?.message || e));
-    }
-  };
-
-  const uploadImage = async (asset: any) => {
-    setLoading(true);
-    try {
-      const storedData = await SecureStore.getItemAsync('userData');
-      if (!storedData) {
-        Alert.alert("Error", "No se encontró sesión de usuario.");
-        setLoading(false);
-        return;
-      }
-      const user = JSON.parse(storedData);
-
-      const res = await fetch(`${API_URL}/subir_foto_perfil_app.php`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          usuario_id: user.id,
-          foto_base64: asset.base64,
-        }),
-      });
-      
-      const responseText = await res.text();
-      let json;
-      try {
-        json = JSON.parse(responseText);
-      } catch (err) {
-        console.log("No es JSON:", responseText);
-        Alert.alert("Error del servidor", "Respuesta no válida: " + responseText.substring(0, 100));
-        setLoading(false);
-        return;
-      }
-
-      if (json.success) {
-        Alert.alert("Éxito", "Foto de perfil actualizada correctamente");
-        fetchPerfil(); 
-      } else {
-        Alert.alert("Error al subir", json.message || "El servidor rechazó la imagen.");
-      }
-    } catch (e: any) {
-      console.log("Error de subida:", e);
-      Alert.alert("Error de subida", e.message || "Error de red al procesar la imagen");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const deleteImage = async () => {
-    setLoading(true);
-    try {
-      const storedData = await SecureStore.getItemAsync('userData');
-      if (!storedData) return;
-      const user = JSON.parse(storedData);
-
-      const res = await fetch(`${API_URL}/eliminar_foto_perfil_app.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usuario_id: user.id })
-      });
-      const json = await res.json();
-      if (json.success) {
-        Alert.alert("Éxito", "Foto eliminada");
-        fetchPerfil();
-      } else {
-        Alert.alert("Error", json.message || "Error al eliminar");
-      }
-    } catch (e) {
-      console.log(e);
-      Alert.alert("Error", "Error de red al eliminar la imagen");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const userName = perfilData?.nombre || "Cargando...";
-  const userEmail = perfilData?.correo || "Cargando...";
-  const userRole = perfilData?.rol || "Colaborador";
-  
-  const getInitials = (name: string) => {
-    const parts = name.split(' ').filter(Boolean);
-    if (parts.length === 0) return '';
-    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  };
+  const { user, logout } = useUser();
+  const {
+    perfilData,
+    loading,
+    userName,
+    userEmail,
+    userRole,
+    getInitials,
+    handleAvatarPress,
+  } = usePerfil(user?.id);
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
@@ -230,7 +57,7 @@ export default function PerfilScreen() {
           <InfoRow label="CREACIÓN" value={perfilData?.fecha_ingreso || "--"} noBorder />
         </View>
 
-        <TouchableOpacity style={styles.logoutCard} onPress={handleLogout}>
+        <TouchableOpacity style={styles.logoutCard} onPress={logout}>
           <View style={styles.logoutContent}>
             <Ionicons name="log-out-outline" size={24} color="#dc3545" style={{ transform: [{ rotate: '180deg' }] }} />
             <Text style={styles.logoutText}>Cerrar sesion</Text>

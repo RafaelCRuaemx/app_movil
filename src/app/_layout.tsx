@@ -1,5 +1,7 @@
+import NetworkStatusBar from '@/components/NetworkStatusBar';
 import { isRunningInExpoGo } from 'expo';
 import { Slot } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // Configurar notificaciones solo en Development Build o APK instalable (Expo Go en Android bloquea expo-notifications desde SDK 53)
@@ -25,6 +27,10 @@ if (!isRunningInExpoGo()) {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
+      <StatusBar style = "dark"/>
+      
+      <NetworkStatusBar/>
+      {/* */}
       <Slot />
     </SafeAreaProvider>
   );
