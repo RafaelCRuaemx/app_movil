@@ -55,8 +55,8 @@ export default function PerfilScreen() {
           <InfoRow label="CREACIÓN" value={perfilData?.fecha_ingreso || "--"} noBorder />
         </View>
 
-        <View ref={registrarElementoTour('perfil_logout')} collapsable={false}>
-          <TouchableOpacity style={styles.logoutCard} onPress={logout}>
+        <View ref={registrarElementoTour('perfil_logout')} collapsable={false} style={{ marginBottom: 40 }}>
+          <TouchableOpacity style={[styles.logoutCard, { marginBottom: 0 }]} onPress={logout}>
             <View style={styles.logoutContent}>
               <Ionicons name="log-out-outline" size={24} color="#dc3545" style={{ transform: [{ rotate: '180deg' }] }} />
               <Text style={styles.logoutText}>Cerrar sesion</Text>

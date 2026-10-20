@@ -184,10 +184,10 @@ export default function TabIndexScreen() {
 
         {/* ACCIONES DE REGISTRO */}
         {dashboardData?.proximo_paso !== 'completo' && (
-          <View ref={registrarElementoTour('dash_accion')} collapsable={false} style={{ marginBottom: 25 }}>
+          <View ref={registrarElementoTour('dash_accion')} collapsable={false} style={{ marginBottom: 16 }}>
             {dashboardData?.es_home_office ? (
               <TouchableOpacity 
-                style={[styles.btnHomeOfficeAction, registrandoHO && { opacity: 0.7 }]} 
+                style={[styles.btnHomeOfficeAction, { marginBottom: 0 }, registrandoHO && { opacity: 0.7 }]} 
                 onPress={registrarHomeOfficeDirecto}
                 disabled={registrandoHO}
               >
@@ -201,7 +201,7 @@ export default function TabIndexScreen() {
                 </Text>
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={styles.bigScanBtn} onPress={() => router.push('/scanner')}>
+              <TouchableOpacity style={[styles.bigScanBtn, { marginBottom: 0 }]} onPress={() => router.push('/scanner')}>
                 <Ionicons name={getIconForStep(dashboardData?.proximo_paso)} size={24} color="white" style={{ marginRight: 10 }} />
                 <Text style={styles.bigScanBtnText}>
                   {dashboardData?.hero_btn_text || 'Escanear QR'}

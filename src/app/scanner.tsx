@@ -159,9 +159,9 @@ export default function ScannerScreen() {
               El escaneo de código QR de oficina está inhabilitado para tu jornada remota. Por favor registra tu asistencia con tu huella digital.
             </Text>
 
-            <View ref={registrarElementoTour('scanner_boton')} collapsable={false} style={{ width: '100%' }}>
+            <View ref={registrarElementoTour('scanner_boton')} collapsable={false} style={{ width: '100%', marginBottom: 10 }}>
               <TouchableOpacity 
-                style={[styles.btnHoBiometric, loadingHO && { opacity: 0.7 }]} 
+                style={[styles.btnHoBiometric, { marginBottom: 0 }, loadingHO && { opacity: 0.7 }]} 
                 onPress={registrarHomeOfficeDirecto}
                 disabled={loadingHO}
               >
@@ -242,10 +242,10 @@ export default function ScannerScreen() {
               )}
             </View>
 
-            <View ref={registrarElementoTour('scanner_boton')} collapsable={false} style={{ width: '100%' }}>
+            <View ref={registrarElementoTour('scanner_boton')} collapsable={false} style={{ width: '100%', marginBottom: 12 }}>
               {!cameraActive ? (
                 <TouchableOpacity 
-                  style={[styles.btnPrimary, validatingPreflight && { opacity: 0.7 }]} 
+                  style={[styles.btnPrimary, { marginBottom: 0 }, validatingPreflight && { opacity: 0.7 }]} 
                   onPress={() => validarYIniciarCamara()}
                   disabled={validatingPreflight}
                 >
@@ -259,12 +259,12 @@ export default function ScannerScreen() {
                   </Text>
                 </TouchableOpacity>
               ) : scanned ? (
-                <TouchableOpacity style={styles.btnOutline} onPress={() => setScanned(false)}>
+                <TouchableOpacity style={[styles.btnOutline, { marginBottom: 0 }]} onPress={() => setScanned(false)}>
                   <Ionicons name="refresh" size={20} color="#0d6efd" style={{ marginRight: 8 }} />
                   <Text style={styles.btnOutlineText}>Escanear de nuevo</Text>
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity style={styles.btnOutline} onPress={() => setCameraActive(false)}>
+                <TouchableOpacity style={[styles.btnOutline, { marginBottom: 0 }]} onPress={() => setCameraActive(false)}>
                   <Ionicons name="stop-circle-outline" size={20} color="#64748b" style={{ marginRight: 8 }} />
                   <Text style={[styles.btnOutlineText, { color: '#64748b' }]}>Detener cámara</Text>
                 </TouchableOpacity>
