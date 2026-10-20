@@ -1,15 +1,16 @@
+import { estaTourActivo, iniciarTourGlobal, registrarElementoTour, verificarTourPrimeraVez } from '@/components/OnboardingModal';
+import { useBiometrics } from '@/hooks/useBiometrics';
+import { useDashboard } from '@/hooks/useDashboard';
+import { useLocation } from '@/hooks/useLocation';
+import { useQRScanner } from '@/hooks/useQRScanner';
+import { useUser } from '@/hooks/useUser';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView } from 'expo-camera';
-import { useLocation } from '@/hooks/useLocation';
-import { useBiometrics } from '@/hooks/useBiometrics';
-import { useUser } from '@/hooks/useUser';
-import { useDashboard } from '@/hooks/useDashboard';
-import { useQRScanner } from '@/hooks/useQRScanner';
+import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 
 const BARCODE_SETTINGS = { barcodeTypes: ['qr' as const] };
 
@@ -56,6 +57,21 @@ export default function ScannerScreen() {
   } = useQRScanner(userData, obtenerUbicacion);
 
   const [loadingHO, setLoadingHO] = useState(false);
+  const [torch, setTorch] = useState(false);
+  const validacionInicialEjecutada = useRef(false);
+
+  // Primero verificamos si debe abrirse el Tour Guiado; solo si NO está activo el tour validamos red/GPS
+  useEffect(() => {
+    if (!userData?.id || validacionInicialEjecutada.current) return;
+    validacionInicialEjecutada.current = true;
+
+    (async () => {
+      const seAbrioTour = await verificarTourPrimeraVez();
+      if (!seAbrioTour && !estaTourActivo()) {
+        validarYIniciarCamara(userData);
+      }
+    })();
+  }, [userData?.id, validarYIniciarCamara, userData]);
 
   // Registro directo en modalidad Home Office con huella digital (sin QR)
   const registrarHomeOfficeDirecto = async () => {
@@ -101,14 +117,24 @@ export default function ScannerScreen() {
           <Ionicons name="arrow-back" size={24} color="#0f172a" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Escanear Asistencia</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity
+          onPress={() => {
+            setPreflightFailedModal(false);
+            iniciarTourGlobal();
+          }}
+          style={{ padding: 4 }}
+        >
+          <Ionicons name="help-circle-outline" size={26} color="#0d6efd" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.container} bounces={false}>
-        <View style={styles.officeBox}>
+        <View ref={registrarElementoTour('scanner_oficina')} collapsable={false} style={styles.officeBox}>
           <Ionicons name="business-outline" size={18} color="#475569" style={{ marginRight: 8 }} />
           <Text style={styles.officeTextNormal}>Oficina: </Text>
-          <Text style={styles.officeTextBold}>{userData?.oficina_nombre || "Tu Oficina"}</Text>
+          <Text style={styles.officeTextBold}>
+            {preflightData?.oficina_nombre || userData?.oficina_nombre || "Tu Oficina"}
+          </Text>
         </View>
 
         {isHomeOffice && (
@@ -124,7 +150,7 @@ export default function ScannerScreen() {
         )}
 
         {isHomeOffice ? (
-          <View style={styles.hoContainerCard}>
+          <View ref={registrarElementoTour('scanner_marco')} collapsable={false} style={styles.hoContainerCard}>
             <View style={styles.hoIconLargeWrap}>
               <Ionicons name="finger-print" size={54} color="#0284c7" />
             </View>
@@ -133,20 +159,22 @@ export default function ScannerScreen() {
               El escaneo de código QR de oficina está inhabilitado para tu jornada remota. Por favor registra tu asistencia con tu huella digital.
             </Text>
 
-            <TouchableOpacity 
-              style={[styles.btnHoBiometric, loading && { opacity: 0.7 }]} 
-              onPress={registrarHomeOfficeDirecto}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
-              ) : (
-                <Ionicons name="finger-print" size={22} color="#ffffff" style={{ marginRight: 8 }} />
-              )}
-              <Text style={styles.btnHoBiometricText}>
-                {loading ? 'Validando huella...' : 'Checar con Huella Digital'}
-              </Text>
-            </TouchableOpacity>
+            <View ref={registrarElementoTour('scanner_boton')} collapsable={false} style={{ width: '100%' }}>
+              <TouchableOpacity 
+                style={[styles.btnHoBiometric, loadingHO && { opacity: 0.7 }]} 
+                onPress={registrarHomeOfficeDirecto}
+                disabled={loadingHO}
+              >
+                {loadingHO ? (
+                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                ) : (
+                  <Ionicons name="finger-print" size={22} color="#ffffff" style={{ marginRight: 8 }} />
+                )}
+                <Text style={styles.btnHoBiometricText}>
+                  {loadingHO ? 'Validando huella...' : 'Checar con Huella Digital'}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity 
               style={[styles.btnOutline, { marginTop: 10 }]} 
@@ -163,7 +191,7 @@ export default function ScannerScreen() {
                 : 'Se validará tu conexión a la red de la oficina y tu ubicación GPS antes de activar la cámara.'}
             </Text>
 
-            <View style={styles.cameraWrapper}>
+            <View ref={registrarElementoTour('scanner_marco')} collapsable={false} style={styles.cameraWrapper}>
               <View style={[styles.corner, styles.cornerTL]} />
               <View style={[styles.corner, styles.cornerTR]} />
               <View style={[styles.corner, styles.cornerBL]} />
@@ -191,10 +219,18 @@ export default function ScannerScreen() {
                     <CameraView 
                       style={StyleSheet.absoluteFill} 
                       facing="back"
+                      enableTorch={torch}
                       barcodeScannerSettings={BARCODE_SETTINGS}
                       onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
                     />
                   )}
+                  <TouchableOpacity
+                    style={[styles.torchButton, torch && styles.torchButtonActive]}
+                    onPress={() => setTorch(!torch)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name={torch ? 'flashlight' : 'flashlight-outline'} size={22} color="#ffffff" />
+                  </TouchableOpacity>
 
                   {scanned && (
                     <View style={styles.scannedOverlay}>
@@ -206,32 +242,34 @@ export default function ScannerScreen() {
               )}
             </View>
 
-            {!cameraActive ? (
-              <TouchableOpacity 
-                style={[styles.btnPrimary, validatingPreflight && { opacity: 0.7 }]} 
-                onPress={() => validarYIniciarCamara()}
-                disabled={validatingPreflight}
-              >
-                {validatingPreflight ? (
-                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
-                ) : (
-                  <Ionicons name="videocam" size={20} color="#ffffff" style={{ marginRight: 8 }} />
-                )}
-                <Text style={styles.btnPrimaryText}>
-                  {validatingPreflight ? 'Verificando entorno...' : 'Validar y activar cámara'}
-                </Text>
-              </TouchableOpacity>
-            ) : scanned ? (
-              <TouchableOpacity style={styles.btnOutline} onPress={() => setScanned(false)}>
-                <Ionicons name="refresh" size={20} color="#0d6efd" style={{ marginRight: 8 }} />
-                <Text style={styles.btnOutlineText}>Escanear de nuevo</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity style={styles.btnOutline} onPress={() => setCameraActive(false)}>
-                <Ionicons name="stop-circle-outline" size={20} color="#64748b" style={{ marginRight: 8 }} />
-                <Text style={[styles.btnOutlineText, { color: '#64748b' }]}>Detener cámara</Text>
-              </TouchableOpacity>
-            )}
+            <View ref={registrarElementoTour('scanner_boton')} collapsable={false} style={{ width: '100%' }}>
+              {!cameraActive ? (
+                <TouchableOpacity 
+                  style={[styles.btnPrimary, validatingPreflight && { opacity: 0.7 }]} 
+                  onPress={() => validarYIniciarCamara()}
+                  disabled={validatingPreflight}
+                >
+                  {validatingPreflight ? (
+                    <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
+                  ) : (
+                    <Ionicons name="videocam" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+                  )}
+                  <Text style={styles.btnPrimaryText}>
+                    {validatingPreflight ? 'Verificando entorno...' : 'Validar y activar cámara'}
+                  </Text>
+                </TouchableOpacity>
+              ) : scanned ? (
+                <TouchableOpacity style={styles.btnOutline} onPress={() => setScanned(false)}>
+                  <Ionicons name="refresh" size={20} color="#0d6efd" style={{ marginRight: 8 }} />
+                  <Text style={styles.btnOutlineText}>Escanear de nuevo</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.btnOutline} onPress={() => setCameraActive(false)}>
+                  <Ionicons name="stop-circle-outline" size={20} color="#64748b" style={{ marginRight: 8 }} />
+                  <Text style={[styles.btnOutlineText, { color: '#64748b' }]}>Detener cámara</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </>
         )}
 
@@ -247,7 +285,7 @@ export default function ScannerScreen() {
       </ScrollView>
 
       {/* MODAL DE FALLA EN PRE-VUELO (RED O GEOCERCA NO CUMPLIDAS) */}
-      <Modal visible={preflightFailedModal} animationType="fade" transparent={true}>
+      <Modal visible={preflightFailedModal && !estaTourActivo()} animationType="fade" transparent={true}>
         <View style={styles.backdropModal}>
           <View style={styles.diagnosticCard}>
             <View style={styles.diagnosticIconWrap}>
@@ -378,6 +416,8 @@ const styles = StyleSheet.create({
   cameraPlaceholderText: { color: '#94a3b8', marginTop: 6, fontSize: 12, textAlign: 'center', lineHeight: 18 },
   
   scannedOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.9)', justifyContent: 'center', alignItems: 'center' },
+  torchButton: { position: 'absolute', bottom: 14, right: 14, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center' },
+  torchButtonActive: { backgroundColor: '#0d6efd' },
   
   corner: { position: 'absolute', width: 40, height: 40, borderColor: '#0d6efd' },
   cornerTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 20 },

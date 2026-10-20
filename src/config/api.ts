@@ -1,12 +1,12 @@
+import NetInfo from '@react-native-community/netinfo';
 import * as SecureStore from 'expo-secure-store';
-
 /**
  * Configuración centralizada de APIs y Endpoints del Checador Móvil.
  * Lee la variable EXPO_PUBLIC_API_URL definida en el archivo .env,
  * o utiliza la IP local de desarrollo como respaldo de contingencia.
  */
 export const API_URL: string = 
-  process.env.EXPO_PUBLIC_API_URL || 'http://localhost/backend/api';
+  process.env.EXPO_PUBLIC_API_URL || 'https://decompose-grandpa-civic.ngrok-free.dev/UAEMex/wsl/Checador/backend/api';
 
 /**
  * Cliente HTTP centralizado con Timeout automático (10s por defecto),
@@ -17,6 +17,12 @@ export async function apiPost<T = any>(
   body: Record<string, any> = {},
   timeoutMs: number = 10000
 ): Promise<T> {
+  //verififcar si el telefono tiene conexion activa
+  const netState = await NetInfo.fetch();
+  if (netState.isConnected === false) {
+    throw new Error('Sin conexion a internet. Verifica tu Wi-Fi o datos moviles');
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -27,6 +33,7 @@ export async function apiPost<T = any>(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
         ...(deviceKey ? { 'X-Device-Key': deviceKey } : {}),
       },
       body: JSON.stringify(body),

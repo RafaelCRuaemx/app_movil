@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiPost } from '@/config/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 // 1. Constantes y tipos de datos
 export const MESES = [
@@ -89,6 +89,14 @@ export function useHistorial(usuarioId?: number | string) {
       setMesActual(m => m + 1);
     }
     setDiaSeleccionado(1);
+    setFiltroSeleccionado('todos');
+  };
+
+  const irAHoy = () => {
+    const hoy = new Date();
+    setMesActual(hoy.getMonth() + 1);
+    setAnioActual(hoy.getFullYear());
+    setDiaSeleccionado(hoy.getDate());
     setFiltroSeleccionado('todos');
   };
 
@@ -183,6 +191,7 @@ export function useHistorial(usuarioId?: number | string) {
     toggleFiltro,
     irMesAnterior,
     irMesSiguiente,
+    irAHoy,
     mapaDias,
     resumen,
     infoDiaSeleccionado,

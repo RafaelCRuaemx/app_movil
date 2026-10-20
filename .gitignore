@@ -47,3 +47,6 @@ example
 eas.json
 app.json
 app.json.example
+
+.easignore
+

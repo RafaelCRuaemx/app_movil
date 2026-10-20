@@ -1,10 +1,11 @@
+import { registrarElementoTour } from '@/components/OnboardingModal';
+import { useHistorial } from '@/hooks/useHistorial';
+import { useUser } from '@/hooks/useUser';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useUser } from '@/hooks/useUser';
-import { useHistorial } from '@/hooks/useHistorial';
 
 export default function HistorialScreen() {
   const { user } = useUser();
@@ -22,6 +23,7 @@ export default function HistorialScreen() {
     toggleFiltro,
     irMesAnterior,
     irMesSiguiente,
+    irAHoy,
     mapaDias,
     resumen,
     infoDiaSeleccionado,
@@ -41,9 +43,14 @@ export default function HistorialScreen() {
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       {/* HEADER */}
-      <View style={styles.header}>
-        <Ionicons name="calendar-outline" size={24} color="#0f172a" style={{ marginRight: 12 }} />
-        <Text style={styles.headerTitle}>Calendario de Asistencias</Text>
+      <View style={[styles.header, { justifyContent: 'space-between' }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Ionicons name="calendar-outline" size={24} color="#0f172a" style={{ marginRight: 12 }} />
+          <Text style={styles.headerTitle}>Calendario de Asistencias</Text>
+        </View>
+        <TouchableOpacity onPress={irAHoy} style={styles.todayBtn}>
+          <Text style={styles.todayBtnText}>Ir a hoy</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView 
@@ -57,7 +64,7 @@ export default function HistorialScreen() {
         }
       >
         {/* NAVEGADOR DE MES */}
-        <View style={styles.monthSelectorCard}>
+        <View ref={registrarElementoTour('hist_mes_filtros')} collapsable={false} style={styles.monthSelectorCard}>
           <TouchableOpacity onPress={irMesAnterior} style={styles.monthNavBtn}>
             <Ionicons name="chevron-back" size={22} color="#0f172a" />
           </TouchableOpacity>
@@ -110,13 +117,14 @@ export default function HistorialScreen() {
           </TouchableOpacity>
         </View>
 
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#0d6efd" />
-            <Text style={{ marginTop: 10, color: '#64748b', fontSize: 13 }}>Cargando registros...</Text>
+        {loading && (
+          <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+            <ActivityIndicator size="small" color="#0d6efd" style={{ marginRight: 8 }} />
+            <Text style={{ color: '#64748b', fontSize: 13 }}>Actualizando registros...</Text>
           </View>
-        ) : (
-          <>
+        )}
+
+        <>
             {/* BARRA INFORMATIVA CON BOTÓN PARA QUITAR FILTRO */}
             {filtroSeleccionado !== 'todos' && (
               <View style={styles.filterBanner}>
@@ -140,7 +148,7 @@ export default function HistorialScreen() {
             )}
 
             {/* CUADRÍCULA DEL CALENDARIO PRINCIPAL */}
-            <View style={styles.calendarCard}>
+            <View ref={registrarElementoTour('hist_calendario')} collapsable={false} style={styles.calendarCard}>
               <CalendarioGrid 
                 mes={mesActual} 
                 anio={anioActual} 
@@ -320,7 +328,6 @@ export default function HistorialScreen() {
 
             <View style={{ height: 40 }} />
           </>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -341,6 +348,8 @@ function CalendarioGrid({
   const diasSemana = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
   const diasEnMes = new Date(anio, mes, 0).getDate();
   const primerDiaSemana = new Date(anio, mes - 1, 1).getDay(); // 0 = Domingo
+  const hoyReal = new Date();
+  const esMesActual = anio === hoyReal.getFullYear() && mes === hoyReal.getMonth() + 1;
 
   const celdas = [];
   for (let i = 0; i < primerDiaSemana; i++) {
@@ -351,6 +360,7 @@ function CalendarioGrid({
     const registro = mapaDias[d];
     const categoria = clasificarEstado(registro?.estado);
     const estaSeleccionado = diaSeleccionado === d;
+    const esHoy = esMesActual && d === hoyReal.getDate();
 
     // Lógica del filtro reflector
     const coincideFiltro = filtroSeleccionado === 'todos' || categoria === filtroSeleccionado;
@@ -390,6 +400,7 @@ function CalendarioGrid({
           styles.calCell, 
           { backgroundColor: bgColor },
           atenuado && { opacity: 0.25 },
+          esHoy && styles.calCellToday,
           estaSeleccionado && styles.calCellSelected
         ]}
       >
@@ -458,6 +469,9 @@ const styles = StyleSheet.create({
   calCellEmpty: { width: '14.28%', aspectRatio: 1 },
   calCell: { width: '13%', margin: '0.64%', aspectRatio: 1, justifyContent: 'center', alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: 'transparent' },
   calCellSelected: { borderColor: '#0d6efd', borderWidth: 2, transform: [{ scale: 1.05 }] },
+  calCellToday: { borderColor: '#0f172a', borderWidth: 1.5, borderStyle: 'dashed' },
+  todayBtn: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  todayBtnText: { color: '#0d6efd', fontSize: 12, fontWeight: 'bold' },
   calCellText: { fontSize: 13, fontWeight: '700' },
   semaforoMiniDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 3 },
 

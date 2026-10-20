@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { iniciarTourGlobal, registrarElementoTour } from '@/components/OnboardingModal';
 import { useLocation } from '@/hooks/useLocation';
 import { useBiometrics } from '@/hooks/useBiometrics';
 import { useUser } from '@/hooks/useUser';
@@ -93,6 +94,13 @@ export default function TabIndexScreen() {
           </View>
           <View style={styles.headerRight}>
             <TouchableOpacity 
+              style={styles.helpButton}
+              onPress={iniciarTourGlobal}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="help-circle-outline" size={22} color="#0d6efd" />
+            </TouchableOpacity>
+            <TouchableOpacity 
               style={styles.logoutButton}
               onPress={handleLogout}
               activeOpacity={0.7}
@@ -118,7 +126,7 @@ export default function TabIndexScreen() {
         )}
 
         {/* PROGRESO DE HOY (STEPPER) */}
-        <View style={styles.card}>
+        <View ref={registrarElementoTour('dash_progreso')} collapsable={false} style={styles.card}>
           <View style={[styles.rowBetween, { marginBottom: 15, alignItems: 'center' }]}>
             <View>
               <Text style={styles.label}>PROGRESO DE HOY</Text>
@@ -176,7 +184,7 @@ export default function TabIndexScreen() {
 
         {/* ACCIONES DE REGISTRO */}
         {dashboardData?.proximo_paso !== 'completo' && (
-          <View style={{ marginBottom: 25 }}>
+          <View ref={registrarElementoTour('dash_accion')} collapsable={false} style={{ marginBottom: 25 }}>
             {dashboardData?.es_home_office ? (
               <TouchableOpacity 
                 style={[styles.btnHomeOfficeAction, registrandoHO && { opacity: 0.7 }]} 
@@ -204,7 +212,7 @@ export default function TabIndexScreen() {
         )}
 
         {/* ESTADÍSTICAS MENSUALES Y AUDITORÍA DE FALTAS */}
-        <View style={styles.card}>
+        <View ref={registrarElementoTour('dash_resumen')} collapsable={false} style={styles.card}>
           <Text style={[styles.label, { marginBottom: 15 }]}>RESUMEN DE {dashboardData?.mes_texto || 'ESTE MES'}</Text>
 
           <View style={styles.warningBanner}>
@@ -373,6 +381,17 @@ const styles = StyleSheet.create({
   welcomeText: { fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 0.5 },
   userName: { fontSize: 16, fontWeight: 'bold', color: '#0f172a' },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
+  helpButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
   logoutButton: {
     width: 38,
     height: 38,

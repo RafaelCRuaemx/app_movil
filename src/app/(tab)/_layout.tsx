@@ -7,7 +7,7 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#1e293b', // Azul marino muy oscuro
+        tabBarActiveTintColor: '#0d6efd', // Azul marino muy oscuro
         tabBarInactiveTintColor: '#94a3b8', // Gris claro
         tabBarStyle: {
           backgroundColor: '#ffffff',
@@ -31,21 +31,21 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'INICIO',
-          tabBarIcon: ({ color }) => <Ionicons name="home" size={26} color={color} />,
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "home" : 'home-outline'} size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="historial"
         options={{
           title: 'HISTORIAL',
-          tabBarIcon: ({ color }) => <Ionicons name="calendar-outline" size={26} color={color} />,
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? 'calendar' : 'calendar-outline'} size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="perfil"
         options={{
           title: 'PERFIL',
-          tabBarIcon: ({ color }) => <Ionicons name="person-outline" size={26} color={color} />,
+          tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? 'person': 'person-outline'} size={24} color={color} />,
         }}
       />
     </Tabs>

@@ -118,12 +118,6 @@ export function useQRScanner(userData?: any, obtenerUbicacion?: () => Promise<an
     [userData, obtenerUbicacion, procesarResultadoPreflight]
   );
 
-  useEffect(() => {
-    if (userData?.id) {
-      validarYIniciarCamara(userData);
-    }
-  }, [userData?.id, validarYIniciarCamara]);
-
   // 3. Procesar código QR al escanear
   const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
     if (scanned || loading) return;

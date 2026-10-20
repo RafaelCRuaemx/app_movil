@@ -1,8 +1,8 @@
-import { useUser } from '@/hooks/useUser';
+import { registrarElementoTour } from '@/components/OnboardingModal';
 import { usePerfil } from '@/hooks/usePerfil';
+import { useUser } from '@/hooks/useUser';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function PerfilScreen() {
@@ -10,11 +10,12 @@ export default function PerfilScreen() {
   const {
     perfilData,
     loading,
+    refreshing,
+    onRefresh,
     userName,
     userEmail,
     userRole,
     getInitials,
-    handleAvatarPress,
   } = usePerfil(user?.id);
 
   return (
@@ -24,31 +25,28 @@ export default function PerfilScreen() {
           <ActivityIndicator size="large" color="#0f172a" />
         </View>
       )}
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#0f172a" />
-          </TouchableOpacity>
+          <Ionicons name="person-circle-outline" size={26} color="#0f172a" style={{ marginRight: 10 }} />
           <Text style={styles.headerTitle}>Mi perfil</Text>
         </View>
 
         <View style={styles.avatarSection}>
-          <TouchableOpacity style={styles.avatarBox} onPress={handleAvatarPress}>
-            {perfilData?.foto_perfil ? (
-              <Image source={{ uri: perfilData.foto_perfil }} style={styles.avatarImage} />
-            ) : (
-              <Text style={styles.avatarInitials}>{perfilData?.nombre ? getInitials(perfilData.nombre) : 'RC'}</Text>
-            )}
-            <View style={styles.cameraBadge}>
-              <Ionicons name="camera" size={16} color="white" />
-            </View>
-          </TouchableOpacity>
+          <View style={styles.avatarBox}>
+            <Text style={styles.avatarInitials}>
+              {perfilData?.nombre ? getInitials(perfilData.nombre) : 'RC'}
+            </Text>
+          </View>
           <Text style={styles.name}>{userName}</Text>
           <Text style={styles.email}>{userEmail}</Text>
         </View>
 
-        <View style={styles.card}>
+        <View ref={registrarElementoTour('perfil_datos')} collapsable={false} style={styles.card}>
           <InfoRow label="OFICINA" value={perfilData?.oficina || "--"} />
           <InfoRow label="ROL" value={userRole} />
           <InfoRow label="DÍAS LAB." value={perfilData?.dias_lab || "--"} />
@@ -57,13 +55,15 @@ export default function PerfilScreen() {
           <InfoRow label="CREACIÓN" value={perfilData?.fecha_ingreso || "--"} noBorder />
         </View>
 
-        <TouchableOpacity style={styles.logoutCard} onPress={logout}>
-          <View style={styles.logoutContent}>
-            <Ionicons name="log-out-outline" size={24} color="#dc3545" style={{ transform: [{ rotate: '180deg' }] }} />
-            <Text style={styles.logoutText}>Cerrar sesion</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
-        </TouchableOpacity>
+        <View ref={registrarElementoTour('perfil_logout')} collapsable={false}>
+          <TouchableOpacity style={styles.logoutCard} onPress={logout}>
+            <View style={styles.logoutContent}>
+              <Ionicons name="log-out-outline" size={24} color="#dc3545" style={{ transform: [{ rotate: '180deg' }] }} />
+              <Text style={styles.logoutText}>Cerrar sesion</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
+          </TouchableOpacity>
+        </View>
 
       </ScrollView>
     </SafeAreaView>
