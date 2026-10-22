@@ -1,8 +1,9 @@
 import { apiPost } from '@/config/api';
+import { PerfilData } from '@/types';
 import { useCallback, useEffect, useState } from 'react';
 
 export function usePerfil(usuarioId?: number | string) {
-  const [perfilData, setPerfilData] = useState<any>(null);
+  const [perfilData, setPerfilData] = useState<PerfilData|null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // 1. Obtener los datos del perfil desde el servidor
@@ -16,7 +17,7 @@ export function usePerfil(usuarioId?: number | string) {
         setPerfilData(json.perfil);
       }
     } catch (e) {
-      console.log('Error fetching profile:', e);
+      if(__DEV__) console.log('Error fetching profile:', e);
     } finally {
       setLoading(false);
     }

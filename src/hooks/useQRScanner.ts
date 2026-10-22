@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Alert } from 'react-native';
+import { apiPost } from '@/config/api';
+import { clearCachedPreflight, getCachedPreflight } from '@/config/preflightCache';
+import { cancelarAlertaComida, programarAlertaComida } from '@/services/notificationService';
 import { useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
-import { apiPost } from '@/config/api';
-import { getCachedPreflight, clearCachedPreflight } from '@/config/preflightCache';
-import { programarAlertaComida, cancelarAlertaComida } from '@/services/notificationService';
+import { useCallback, useRef, useState } from 'react';
+import { Alert } from 'react-native';
 
 export interface PreflightDetails {
   es_home_office: boolean;
@@ -27,6 +27,7 @@ export function useQRScanner(userData?: any, obtenerUbicacion?: () => Promise<an
   const [preflightFailedModal, setPreflightFailedModal] = useState(false);
   const [preflightErrors, setPreflightErrors] = useState<string[]>([]);
   const [isHomeOffice, setIsHomeOffice] = useState(false);
+  const ubicacionValidadaRef = useRef<any>(null);
 
   // Estados para modal de resultado de escaneo
   const [resultModalVisible, setResultModalVisible] = useState(false);
@@ -85,6 +86,7 @@ export function useQRScanner(userData?: any, obtenerUbicacion?: () => Promise<an
       // Si la validación ya fue pre-cargada durante la huella, usarla en 0ms
       const cached = getCachedPreflight();
       if (cached) {
+        ubicacionValidadaRef.current = cached.location;
         clearCachedPreflight();
         await procesarResultadoPreflight(cached.preflightRes);
         return;
@@ -103,10 +105,13 @@ export function useQRScanner(userData?: any, obtenerUbicacion?: () => Promise<an
           return;
         }
 
+        ubicacionValidadaRef.current = loc;
+
         const preflightRes = await apiPost('validar_prevuelo_app.php', {
           usuario_id: user.id,
           lat: loc.latitude,
           lon: loc.longitude,
+          gps_acc: loc.accuracy,
         });
 
         await procesarResultadoPreflight(preflightRes);
@@ -118,13 +123,14 @@ export function useQRScanner(userData?: any, obtenerUbicacion?: () => Promise<an
     [userData, obtenerUbicacion, procesarResultadoPreflight]
   );
 
-  // 3. Procesar código QR al escanear
+  // 3. Procesar código QR al escanear (reutilizando el GPS ya validado en el pre-vuelo para respuesta inmediata)
   const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
     if (scanned || loading) return;
     setScanned(true);
     setLoading(true);
 
-    const currentLocation = obtenerUbicacion ? await obtenerUbicacion() : null;
+    const currentLocation =
+      ubicacionValidadaRef.current || (obtenerUbicacion ? await obtenerUbicacion() : null);
     if (!currentLocation) {
       setLoading(false);
       setModalType('error');

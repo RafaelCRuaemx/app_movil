@@ -20,7 +20,7 @@ export function useBiometrics(){
                 tieneHuella : enrolled
             };
         } catch (e) {
-            console.log('error verificando biometria: ',e);
+            if (__DEV__) console.log('error verificando biometria: ',e);
             setEsCompatible(false);
             setTieneHuella(false);
             return {esCompatible:false,
@@ -71,7 +71,7 @@ export function useBiometrics(){
                 return false;
             }
         } catch (e) {
-            console.log('Error en autenticacion biometrica: ', e);
+           if (__DEV__)  console.log('Error en autenticacion biometrica: ', e);
             return false;
         }
     },[] );

@@ -1,14 +1,16 @@
-import { registrarElementoTour } from '@/components/OnboardingModal';
-import { useHistorial } from '@/hooks/useHistorial';
-import { useUser } from '@/hooks/useUser';
-import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { registrarElementoTour } from "@/components/OnboardingModal";
+import { CalendarioGrid } from "@/components/historial/CalendarioGrid";
+import { DiaDetalleCard } from "@/components/historial/DiaDetalleCard";
+import { FullHistorialList } from "@/components/historial/FullHistorialList";
+import { MonthSelectorCard } from "@/components/historial/MonthSelectorCard";
+import { useHistorial } from "@/hooks/useHistorial";
+import { useUser } from "@/hooks/useUser";
+import { Ionicons } from "@expo/vector-icons";
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function HistorialScreen() {
-  const { user } = useUser();
+export default function HistorialScreen(){
+  const {user} = useUser();
   const {
     historial,
     loading,
@@ -32,13 +34,8 @@ export default function HistorialScreen() {
     recargar,
   } = useHistorial(user?.id);
 
-  const [mostrarListaCompleta, setMostrarListaCompleta] = useState(false);
-
-  useFocusEffect(
-    useCallback(() => {
-      recargar();
-    }, [recargar])
-  );
+  const hoyReal = new Date();
+  const esMesActual = anioActual === hoyReal.getFullYear() && mesActual === hoyReal.getMonth() + 1;
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
@@ -48,494 +45,92 @@ export default function HistorialScreen() {
           <Ionicons name="calendar-outline" size={24} color="#0f172a" style={{ marginRight: 12 }} />
           <Text style={styles.headerTitle}>Calendario de Asistencias</Text>
         </View>
-        <TouchableOpacity onPress={irAHoy} style={styles.todayBtn}>
+        <TouchableOpacity onPress={irAHoy} style={styles.todayBtn} activeOpacity={0.7}>
           <Text style={styles.todayBtnText}>Ir a hoy</Text>
         </TouchableOpacity>
       </View>
-
       <ScrollView 
         style={styles.container} 
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
-            onRefresh={onRefresh} 
-          />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* NAVEGADOR DE MES */}
-        <View ref={registrarElementoTour('hist_mes_filtros')} collapsable={false} style={styles.monthSelectorCard}>
-          <TouchableOpacity onPress={irMesAnterior} style={styles.monthNavBtn}>
-            <Ionicons name="chevron-back" size={22} color="#0f172a" />
-          </TouchableOpacity>
-          
-          <View style={{ alignItems: 'center' }}>
-            <Text style={styles.monthTitle}>{MESES[mesActual - 1]} {anioActual}</Text>
-                        {/* CHIPS INTERACTIVOS DE FILTRADO */}
-            <View style={styles.summaryChipsRow}>
-              <TouchableOpacity 
-                style={[
-                  styles.filterChip, 
-                  filtroSeleccionado === 'puntual' && styles.filterChipPuntualActive
-                ]}
-                onPress={() => toggleFiltro('puntual')}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.chipText, { color: '#16a34a' }]}>● {resumen.puntuales} Puntuales</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[
-                  styles.filterChip, 
-                  filtroSeleccionado === 'retardo' && styles.filterChipRetardoActive
-                ]}
-                onPress={() => toggleFiltro('retardo')}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.chipText, { color: '#d97706' }]}>● {resumen.retardos} Retardos</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[
-                  styles.filterChip, 
-                  filtroSeleccionado === 'falta' && styles.filterChipFaltaActive
-                ]}
-                onPress={() => toggleFiltro('falta')}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.chipText, { color: '#dc2626' }]}>● {resumen.faltas} Faltas</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <TouchableOpacity 
-            onPress={irMesSiguiente} 
-            style={[styles.monthNavBtn, (anioActual === new Date().getFullYear() && mesActual === new Date().getMonth() + 1) && { opacity: 0.25 }]}
-            disabled={anioActual === new Date().getFullYear() && mesActual === new Date().getMonth() + 1}
-          >
-            <Ionicons name="chevron-forward" size={22} color="#0f172a" />
-          </TouchableOpacity>
+        {/* NAVEGADOR DE MES Y CHIPS */}
+        <View ref={registrarElementoTour('hist_mes_filtros')} collapsable={false}>
+          <MonthSelectorCard
+            mesTexto={MESES[mesActual - 1]}
+            anioActual={anioActual}
+            resumen={resumen}
+            filtroSeleccionado={filtroSeleccionado}
+            toggleFiltro={toggleFiltro}
+            irMesAnterior={irMesAnterior}
+            irMesSiguiente={irMesSiguiente}
+            esMesActual={esMesActual}
+          />
         </View>
-
         {loading && (
-          <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+          <View style={styles.loadingRow}>
             <ActivityIndicator size="small" color="#0d6efd" style={{ marginRight: 8 }} />
             <Text style={{ color: '#64748b', fontSize: 13 }}>Actualizando registros...</Text>
           </View>
         )}
-
-        <>
-            {/* BARRA INFORMATIVA CON BOTÓN PARA QUITAR FILTRO */}
-            {filtroSeleccionado !== 'todos' && (
-              <View style={styles.filterBanner}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name="funnel-outline" size={14} color="#0d6efd" style={{ marginRight: 6 }} />
-                  <Text style={styles.filterBannerText}>
-                    Filtrado por: <Text style={styles.filterBannerBold}>
-                      {filtroSeleccionado === 'puntual' ? 'Puntuales' : filtroSeleccionado === 'retardo' ? 'Retardos' : 'Faltas'}
-                    </Text>
-                  </Text>
-                </View>
-                <TouchableOpacity 
-                  style={styles.clearFilterBtn} 
-                  onPress={() => setFiltroSeleccionado('todos')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="close" size={14} color="#0d6efd" style={{ marginRight: 2 }} />
-                  <Text style={styles.clearFilterBtnText}>Quitar filtro</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* CUADRÍCULA DEL CALENDARIO PRINCIPAL */}
-            <View ref={registrarElementoTour('hist_calendario')} collapsable={false} style={styles.calendarCard}>
-              <CalendarioGrid 
-                mes={mesActual} 
-                anio={anioActual} 
-                mapaDias={mapaDias}
-                diaSeleccionado={diaSeleccionado}
-                onSeleccionarDia={(d) => setDiaSeleccionado(d)}
-                clasificarEstado={clasificarEstado}
-                filtroSeleccionado={filtroSeleccionado}
-              />
-
-
-              {/* SIMBOLOGÍA DEL SEMÁFORO */}
-              <View style={styles.legendContainer}>
-                <View style={styles.legendItem}>
-                  <View style={[styles.dot, { backgroundColor: '#16a34a' }]} />
-                  <Text style={styles.legendText}>Puntual</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.dot, { backgroundColor: '#d97706' }]} />
-                  <Text style={styles.legendText}>Retardo</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.dot, { backgroundColor: '#dc2626' }]} />
-                  <Text style={styles.legendText}>Falta</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.dot, { backgroundColor: '#cbd5e1' }]} />
-                  <Text style={styles.legendText}>No laboral</Text>
-                </View>
-              </View>
-            </View>
-
-           
-            {/* TARJETA DETALLE DEL DÍA SELECCIONADO */}
-            <View style={styles.detailCard}>
-              <View style={styles.detailHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.detailDate}>{infoDiaSeleccionado.fechaTexto}</Text>
-                  <Text style={styles.detailSub}>Detalle de la jornada</Text>
-                </View>
-
-                {infoDiaSeleccionado.existe ? (
-                  <View style={[
-                    styles.statusBadge, 
-                    infoDiaSeleccionado.categoria === 'puntual' && styles.statusBadgeGreen,
-                    infoDiaSeleccionado.categoria === 'retardo' && styles.statusBadgeYellow,
-                    infoDiaSeleccionado.categoria === 'falta' && styles.statusBadgeRed,
-                  ]}>
-                    <Text style={[
-                      styles.statusBadgeText,
-                      infoDiaSeleccionado.categoria === 'puntual' && { color: '#166534' },
-                      infoDiaSeleccionado.categoria === 'retardo' && { color: '#b45309' },
-                      infoDiaSeleccionado.categoria === 'falta' && { color: '#991b1b' },
-                    ]}>
-                      {infoDiaSeleccionado.categoria === 'puntual' ? '✓ Puntual' : 
-                       infoDiaSeleccionado.categoria === 'retardo' ? '⏰ Retardo' : '✕ Falta'}
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={[styles.statusBadge, { backgroundColor: '#f1f5f9' }]}>
-                    <Text style={[styles.statusBadgeText, { color: '#64748b' }]}>
-                      {infoDiaSeleccionado.esFinDeSemana ? 'Fin de semana' : infoDiaSeleccionado.esFuturo ? 'Próximo' : 'Sin datos'}
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              {infoDiaSeleccionado.existe && infoDiaSeleccionado.categoria !== 'falta' ? (
-                /* CUADRÍCULA DE 4 TIEMPOS DE ASISTENCIA */
-                <View style={styles.timesGrid}>
-                  <TimeBox 
-                    icon="sunny-outline" 
-                    title="Entrada" 
-                    time={infoDiaSeleccionado.entrada} 
-                    color="#0d6efd"
-                  />
-                  <TimeBox 
-                    icon="cafe-outline" 
-                    title="Sal. Comida" 
-                    time={infoDiaSeleccionado.comidaSalida} 
-                    color="#d97706"
-                  />
-                  <TimeBox 
-                    icon="fast-food-outline" 
-                    title="Reg. Comida" 
-                    time={infoDiaSeleccionado.comidaRegreso} 
-                    color="#059669"
-                  />
-                  <TimeBox 
-                    icon="exit-outline" 
-                    title="Salida" 
-                    time={infoDiaSeleccionado.salida} 
-                    color="#475569"
-                  />
-                </View>
-              ) : infoDiaSeleccionado.existe && infoDiaSeleccionado.categoria === 'falta' ? (
-                /* AVISO DE FALTA */
-                <View style={styles.faltaAlertBox}>
-                  <Ionicons name="alert-circle" size={24} color="#dc2626" style={{ marginRight: 10 }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.faltaAlertTitle}>Falta por inasistencia</Text>
-                    <Text style={styles.faltaAlertDesc}>No se registró entrada ni salida en este día laboral.</Text>
-                  </View>
-                </View>
-              ) : (
-                /* DÍA NO LABORABLE O FUTURO */
-                <View style={styles.neutroAlertBox}>
-                  <Ionicons name="information-circle-outline" size={22} color="#64748b" style={{ marginRight: 8 }} />
-                  <Text style={styles.neutroAlertText}>
-                    {infoDiaSeleccionado.esFinDeSemana 
-                      ? 'Día de descanso semanal (Sábado / Domingo).' 
-                      : 'Este día no cuenta con registros requeridos.'}
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* BOTÓN COLAPSABLE PARA VER TODAS LAS JORNADAS EN LISTA */}
-            <TouchableOpacity 
-              style={styles.toggleListBtn} 
-              onPress={() => setMostrarListaCompleta(!mostrarListaCompleta)}
-            >
-              <Text style={styles.toggleListBtnText}>
-                {mostrarListaCompleta ? 'Ocultar listado completo' : 'Ver todas las jornadas del mes (Lista)'}
+        {/* BARRA INFORMATIVA DE FILTRO ACTIVO */}
+        {filtroSeleccionado !== 'todos' && (
+          <View style={styles.filterBanner}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name="funnel-outline" size={14} color="#0d6efd" style={{ marginRight: 6 }} />
+              <Text style={styles.filterBannerText}>
+                Filtrado por: <Text style={styles.filterBannerBold}>
+                  {filtroSeleccionado === 'puntual' ? 'Puntuales' : filtroSeleccionado === 'retardo' ? 'Retardos' : 'Faltas'}
+                </Text>
               </Text>
-              <Ionicons 
-                name={mostrarListaCompleta ? "chevron-up" : "chevron-down"} 
-                size={18} 
-                color="#0d6efd" 
-              />
+            </View>
+            <TouchableOpacity 
+              style={styles.clearFilterBtn} 
+              onPress={() => setFiltroSeleccionado('todos')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={14} color="#0d6efd" style={{ marginRight: 2 }} />
+              <Text style={styles.clearFilterBtnText}>Quitar filtro</Text>
             </TouchableOpacity>
-
-            {mostrarListaCompleta && (
-              <View style={styles.fullListCard}>
-                {historial.map((h: any, idx: number) => {
-                  const cat = clasificarEstado(h.estado);
-                  const isFalta = cat === 'falta';
-                  const isRet = cat === 'retardo';
-
-                  return (
-                    <View 
-                      key={idx} 
-                      style={[styles.fullListRow, idx < historial.length - 1 && styles.fullListRowBorder]}
-                    >
-                      <View style={[
-                        styles.fullListDot, 
-                        { backgroundColor: isFalta ? '#dc2626' : isRet ? '#d97706' : '#16a34a' }
-                      ]} />
-                      
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.fullListDate}>{h.fecha_formateada}</Text>
-                        {!isFalta ? (
-                          <Text style={styles.fullListTimes}>
-                            Ent. {h.entrada} · Com. {h.comida_salida} · Reg. {h.comida_regreso} · Sal. {h.salida}
-                          </Text>
-                        ) : (
-                          <Text style={{ color: '#dc2626', fontSize: 12 }}>Sin asistencia</Text>
-                        )}
-                      </View>
-
-                      <View style={[
-                        styles.miniBadge, 
-                        { backgroundColor: isFalta ? '#fef2f2' : isRet ? '#fffbeb' : '#f0fdf4' }
-                      ]}>
-                        <Text style={[
-                          styles.miniBadgeText, 
-                          { color: isFalta ? '#dc2626' : isRet ? '#d97706' : '#16a34a' }
-                        ]}>
-                          {isFalta ? 'Falta' : isRet ? 'Retardo' : 'Puntual'}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-
-            <View style={{ height: 40 }} />
-          </>
+          </View>
+        )}
+        {/* CUADRÍCULA CALENDARIO */}
+        <View ref={registrarElementoTour('hist_calendario')} collapsable={false}>
+          <CalendarioGrid
+            mes={mesActual}
+            anio={anioActual}
+            mapaDias={mapaDias}
+            diaSeleccionado={diaSeleccionado}
+            onSeleccionarDia={(d) => setDiaSeleccionado(d)}
+            clasificarEstado={clasificarEstado}
+            filtroSeleccionado={filtroSeleccionado}
+          />
+        </View>
+        {/* DETALLE DEL DÍA SELECCIONADO */}
+        <DiaDetalleCard infoDiaSeleccionado={infoDiaSeleccionado} />
+        {/* LISTADO COMPLETO DEL MES */}
+        <FullHistorialList historial={historial} clasificarEstado={clasificarEstado} />
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-// ── COMPONENTE CUADRÍCULA CALENDARIO CON SEMÁFORO Y FILTRO ──
-function CalendarioGrid({ 
-  mes, anio, mapaDias, diaSeleccionado, onSeleccionarDia, clasificarEstado, filtroSeleccionado 
-}: { 
-  mes: number, 
-  anio: number, 
-  mapaDias: Record<number, any>, 
-  diaSeleccionado: number, 
-  onSeleccionarDia: (d: number) => void,
-  clasificarEstado: (e?: string) => 'puntual' | 'retardo' | 'falta' | 'neutro',
-  filtroSeleccionado: 'todos' | 'puntual' | 'retardo' | 'falta'
-}) {
-  const diasSemana = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
-  const diasEnMes = new Date(anio, mes, 0).getDate();
-  const primerDiaSemana = new Date(anio, mes - 1, 1).getDay(); // 0 = Domingo
-  const hoyReal = new Date();
-  const esMesActual = anio === hoyReal.getFullYear() && mes === hoyReal.getMonth() + 1;
-
-  const celdas = [];
-  for (let i = 0; i < primerDiaSemana; i++) {
-    celdas.push(<View key={`empty-${i}`} style={styles.calCellEmpty} />);
-  }
-
-  for (let d = 1; d <= diasEnMes; d++) {
-    const registro = mapaDias[d];
-    const categoria = clasificarEstado(registro?.estado);
-    const estaSeleccionado = diaSeleccionado === d;
-    const esHoy = esMesActual && d === hoyReal.getDate();
-
-    // Lógica del filtro reflector
-    const coincideFiltro = filtroSeleccionado === 'todos' || categoria === filtroSeleccionado;
-    const atenuado = filtroSeleccionado !== 'todos' && !coincideFiltro;
-
-    let bgColor = '#f8fafc';
-    let textColor = '#0f172a';
-    let dotColor = '#cbd5e1';
-
-    if (categoria === 'puntual') {
-      bgColor = '#dcfce7'; // Verde suave
-      textColor = '#166534';
-      dotColor = '#16a34a';
-    } else if (categoria === 'retardo') {
-      bgColor = '#fef3c7'; // Amarillo suave
-      textColor = '#b45309';
-      dotColor = '#d97706';
-    } else if (categoria === 'falta') {
-      bgColor = '#fee2e2'; // Rojo suave
-      textColor = '#991b1b';
-      dotColor = '#dc2626';
-    }
-
-    // Si el día no coincide con el filtro activo, se atenúa suavemente
-    if (atenuado) {
-      bgColor = '#f8fafc';
-      textColor = '#cbd5e1';
-      dotColor = 'transparent';
-    }
-
-    celdas.push(
-      <TouchableOpacity 
-        key={`day-${d}`} 
-        activeOpacity={0.7}
-        onPress={() => onSeleccionarDia(d)}
-        style={[
-          styles.calCell, 
-          { backgroundColor: bgColor },
-          atenuado && { opacity: 0.25 },
-          esHoy && styles.calCellToday,
-          estaSeleccionado && styles.calCellSelected
-        ]}
-      >
-        <Text style={[
-          styles.calCellText, 
-          { color: textColor },
-          estaSeleccionado && { fontWeight: '900' }
-        ]}>
-          {d}
-        </Text>
-        
-        {/* Bolita del semáforo */}
-        <View style={[styles.semaforoMiniDot, { backgroundColor: dotColor }]} />
-      </TouchableOpacity>
-    );
-  }
-
-  return (
-    <View style={styles.calWrapper}>
-      <View style={styles.calWeekRow}>
-        {diasSemana.map((dia, idx) => (
-          <Text key={idx} style={[styles.calWeekHeader, (idx === 0 || idx === 6) && { color: '#cbd5e1' }]}>
-            {dia}
-          </Text>
-        ))}
-      </View>
-      <View style={styles.calDaysGrid}>
-        {celdas}
-      </View>
-    </View>
-  );
-}
-
-// ── COMPONENTE DE CAJITA DE TIEMPO ──
-function TimeBox({ icon, title, time, color }: { icon: any, title: string, time: string, color: string }) {
-  const isFilled = time && time !== '--:--';
-  return (
-    <View style={styles.timeBox}>
-      <Ionicons name={icon} size={18} color={isFilled ? color : '#94a3b8'} style={{ marginBottom: 4 }} />
-      <Text style={styles.timeBoxTitle}>{title}</Text>
-      <Text style={[styles.timeBoxTime, isFilled && { color: '#0f172a' }]}>{time}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a' },
-  
-  container: { flex: 1, padding: 16 },
-
-  monthSelectorCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
-  monthNavBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center' },
-  monthTitle: { fontSize: 16, fontWeight: 'bold', color: '#0f172a' },
-  summaryChipsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  chipText: { fontSize: 11, fontWeight: '700' },
-
-  loadingContainer: { padding: 40, alignItems: 'center' },
-
-  calendarCard: { backgroundColor: '#ffffff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
-  calWrapper: { marginBottom: 10 },
-  calWeekRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  calWeekHeader: { width: '14.28%', textAlign: 'center', fontWeight: 'bold', color: '#64748b', fontSize: 12 },
-  calDaysGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  calCellEmpty: { width: '14.28%', aspectRatio: 1 },
-  calCell: { width: '13%', margin: '0.64%', aspectRatio: 1, justifyContent: 'center', alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: 'transparent' },
-  calCellSelected: { borderColor: '#0d6efd', borderWidth: 2, transform: [{ scale: 1.05 }] },
-  calCellToday: { borderColor: '#0f172a', borderWidth: 1.5, borderStyle: 'dashed' },
   todayBtn: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   todayBtnText: { color: '#0d6efd', fontSize: 12, fontWeight: 'bold' },
-  calCellText: { fontSize: 13, fontWeight: '700' },
-  semaforoMiniDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 3 },
-
-  legendContainer: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#f8fafc', paddingVertical: 10, borderRadius: 10, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
-  legendItem: { flexDirection: 'row', alignItems: 'center' },
-  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 5 },
-  legendText: { fontSize: 11, color: '#64748b', fontWeight: '600' },
-
-  detailCard: { backgroundColor: '#ffffff', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
-  detailHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
-  detailDate: { fontSize: 16, fontWeight: 'bold', color: '#0f172a' },
-  detailSub: { fontSize: 12, color: '#64748b', marginTop: 2 },
-  
-  statusBadge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
-  statusBadgeGreen: { backgroundColor: '#dcfce7' },
-  statusBadgeYellow: { backgroundColor: '#fef3c7' },
-  statusBadgeRed: { backgroundColor: '#fee2e2' },
-  statusBadgeText: { fontSize: 12, fontWeight: 'bold' },
-
-  timesGrid: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  timeBox: { flex: 1, alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 12, paddingVertical: 12, borderWidth: 1, borderColor: '#e2e8f0' },
-  timeBoxTitle: { fontSize: 10, color: '#64748b', fontWeight: 'bold', marginBottom: 4 },
-  timeBoxTime: { fontSize: 13, fontWeight: 'bold', color: '#94a3b8' },
-
-  faltaAlertBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 12, padding: 14 },
-  faltaAlertTitle: { fontSize: 14, fontWeight: 'bold', color: '#991b1b', marginBottom: 2 },
-  faltaAlertDesc: { fontSize: 12, color: '#b91c1c' },
-
-  neutroAlertBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 14 },
-  neutroAlertText: { fontSize: 13, color: '#64748b', flex: 1 },
-
-  toggleListBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#bfdbfe', borderRadius: 12, paddingVertical: 14, marginBottom: 16 },
-  toggleListBtnText: { color: '#0d6efd', fontSize: 14, fontWeight: 'bold', marginRight: 6 },
-
-  fullListCard: { backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', paddingHorizontal: 16 },
-  fullListRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
-  fullListRowBorder: { borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  fullListDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
-  fullListDate: { fontSize: 14, fontWeight: 'bold', color: '#0f172a' },
-  fullListTimes: { fontSize: 12, color: '#64748b', marginTop: 2 },
-  miniBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  miniBadgeText: { fontSize: 11, fontWeight: 'bold' },
-
-  // Estilos del Filtro Interactivo de Incidencias
-  filterChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' },
-  filterChipPuntualActive: { backgroundColor: '#dcfce7', borderColor: '#16a34a' },
-  filterChipRetardoActive: { backgroundColor: '#fef3c7', borderColor: '#d97706' },
-  filterChipFaltaActive: { backgroundColor: '#fee2e2', borderColor: '#dc2626' },
-
-  filterResultCard: { backgroundColor: '#ffffff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
-  filterResultHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  filterResultTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
-  clearFilterText: { fontSize: 12, color: '#0d6efd', fontWeight: '600' },
-  emptyFilterText: { fontSize: 13, color: '#94a3b8', fontStyle: 'italic', textAlign: 'center', paddingVertical: 12 },
-
-  incidenciaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10, marginBottom: 4 },
-  incidenciaRowActive: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
-  incidenciaLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  incidenciaDia: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
-  incidenciaFecha: { fontSize: 12, color: '#64748b' },
-  incidenciaRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  incidenciaHora: { fontSize: 13, fontWeight: '600', color: '#334155' },
-  incidenciaBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-
+  container: { flex: 1, padding: 16 },
+  loadingRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   filterBanner: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -548,14 +143,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 12,
   },
-  filterBannerText: {
-    fontSize: 13,
-    color: '#1e40af',
-  },
-  filterBannerBold: {
-    fontWeight: 'bold',
-    textTransform: 'capitalize',
-  },
+  filterBannerText: { fontSize: 13, color: '#1e40af' },
+  filterBannerBold: { fontWeight: 'bold', textTransform: 'capitalize' },
   clearFilterBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -566,9 +155,5 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 8,
   },
-  clearFilterBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#0d6efd',
-  }
+  clearFilterBtnText: { fontSize: 12, fontWeight: '700', color: '#0d6efd' },
 });

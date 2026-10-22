@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import { apiPost } from '@/config/api';
-import { programarAlertaComida, cancelarAlertaComida } from '@/services/notificationService';
+import { cancelarAlertaComida, programarAlertaComida } from '@/services/notificationService';
+import { DashboardData, Usuario } from '@/types';
+import * as SecureStore from 'expo-secure-store';
+import { useCallback, useEffect, useState } from 'react';
 
-export function useDashboard(userData?: any) {
-  const [dashboardData, setDashboardData] = useState<any>(null);
+export function useDashboard(userData?: Usuario | null) {
+  const [dashboardData, setDashboardData] = useState<DashboardData |null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [registrandoHO, setRegistrandoHO] = useState(false);
@@ -38,7 +39,7 @@ export function useDashboard(userData?: any) {
         }
       }
     } catch (e) {
-      console.log('Error al obtener datos del dashboard:', e);
+      if (__DEV__) console.log('Error al obtener datos del dashboard:', e);
     } finally {
       setLoading(false);
     }
@@ -122,7 +123,7 @@ export function useDashboard(userData?: any) {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   };
 
-  const getIconForStep = (step: string) => {
+  const getIconForStep = (step?: string) => {
     switch (step) {
       case 'entrada': return 'sunny-outline';
       case 'salida_comida': return 'cafe-outline';

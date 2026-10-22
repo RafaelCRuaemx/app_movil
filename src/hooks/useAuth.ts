@@ -1,13 +1,13 @@
-import { useState, useEffect } from "react";
-import { Alert, Platform } from 'react-native';
-import * as Device from 'expo-device';
-import * as SecureStore from 'expo-secure-store';
-import { router } from "expo-router";
 import { apiPost } from "@/config/api";
 import { setCachedPreflight } from "@/config/preflightCache";
-import { useBiometrics } from "./useBiometrics";
 import { useLocation } from "@/hooks/useLocation";
+import * as Device from 'expo-device';
 import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
+import * as SecureStore from 'expo-secure-store';
+import { useEffect, useState } from "react";
+import { Alert, Platform } from 'react-native';
+import { useBiometrics } from "./useBiometrics";
 
 export function useAuth(){
     const {autenticar, verificarBiometria} = useBiometrics();
@@ -65,8 +65,8 @@ export function useAuth(){
     };
 
     //3.Guarda sesion y navegar al scanner 
-    const finalizaLogin = async (user: any) => {
-        await SecureStore.setItemAsync('userToken', 'active_session');
+    const finalizaLogin = async (user: any, token?: string) => {
+        await SecureStore.setItemAsync('userToken', token || user?.token || 'active_session');
         await SecureStore.setItemAsync('userData', JSON.stringify(user));
         router.replace('/scanner' as any);
     };
@@ -94,7 +94,7 @@ export function useAuth(){
 
                 if(loginRes.success){
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    await SecureStore.setItemAsync('userToken', 'active_session');
+                    await SecureStore.setItemAsync('userToken', loginRes.token || loginRes.user?.token || 'active_session');
                     await SecureStore.setItemAsync('userData', JSON.stringify(loginRes.user));
 
                     //pre-vuelo anticipado para que /scanner abra en 0ms
@@ -104,6 +104,7 @@ export function useAuth(){
                                 usuario_id : loginRes.user.id,
                                 lat: loc.latitude,
                                 lon: loc.longitude,
+                                gps_acc: loc.accuracy,
                             });
 
                             setCachedPreflight({
@@ -112,7 +113,7 @@ export function useAuth(){
                                 preflightRes,
                             });
                         }catch(errPrevuelo){
-                            console.log('error preflight anticipado:', errPrevuelo);
+                            if(__DEV__) console.log('error preflight anticipado:', errPrevuelo);
                         }
                     }
                     router.replace('/scanner' as any);
@@ -185,7 +186,7 @@ export function useAuth(){
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 setShowTotpModal(false);
                 setTotpCode('');
-                finalizaLogin(data.user);
+                finalizaLogin(data.user, data.token);
             } else {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                 Alert.alert('Código incorrecto', data.message || 'El código no es válido o ha expirado.');
@@ -222,7 +223,7 @@ export function useAuth(){
             '¡Dispositivo Vinculado!',
             `Tu equipo (${deviceName}) ha quedado registrado exitosamente como tu dispositivo oficial de asistencia.`
           );
-          finalizaLogin(data.user || user);
+          finalizaLogin(data.user || user, data.token);
         } else {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           Alert.alert('No se pudo vincular', data.message || 'Error al vincular el dispositivo.');

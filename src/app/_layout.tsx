@@ -20,7 +20,7 @@ if (!isRunningInExpoGo()) {
       }),
     });
   } catch (e) {
-    console.log('Notificaciones no disponibles:', e);
+   if(__DEV__) console.log('Notificaciones no disponibles:', e);
   }
 }
 

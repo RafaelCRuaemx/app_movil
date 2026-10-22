@@ -1,0 +1,31 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://decompose-grandpa-civic.ngrok-free.dev/UAEMex/wsl/Checador/backend/api"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env":{
+        "EXPO_PUBLIC_API_URL": "https://decompose-grandpa-civic.ngrok-free.dev/UAEMex/wsl/Checador/backend/api"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
+

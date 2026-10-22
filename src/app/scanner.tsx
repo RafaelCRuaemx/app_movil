@@ -9,7 +9,7 @@ import { CameraView } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const BARCODE_SETTINGS = { barcodeTypes: ['qr' as const] };
@@ -59,6 +59,32 @@ export default function ScannerScreen() {
   const [loadingHO, setLoadingHO] = useState(false);
   const [torch, setTorch] = useState(false);
   const validacionInicialEjecutada = useRef(false);
+  const laserAnim = useRef(new Animated.Value(14)).current;
+
+  // Animación continua de la línea láser mientras la cámara está activa
+  useEffect(() => {
+    if (cameraActive && !scanned) {
+      laserAnim.setValue(14);
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(laserAnim, {
+            toValue: 276,
+            duration: 1800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(laserAnim, {
+            toValue: 14,
+            duration: 1800,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+  }, [cameraActive, scanned, laserAnim]);
 
   // Primero verificamos si debe abrirse el Tour Guiado; solo si NO está activo el tour validamos red/GPS
   useEffect(() => {
@@ -224,6 +250,15 @@ export default function ScannerScreen() {
                       onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
                     />
                   )}
+                  {!scanned && (
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.laserLine,
+                        { transform: [{ translateY: laserAnim }] },
+                      ]}
+                    />
+                  )}
                   <TouchableOpacity
                     style={[styles.torchButton, torch && styles.torchButtonActive]}
                     onPress={() => setTorch(!torch)}
@@ -347,7 +382,7 @@ export default function ScannerScreen() {
               style={styles.btnCancelModal} 
               onPress={() => {
                 setPreflightFailedModal(false);
-                router.back();
+                router.replace('/(tab)/' as any);
               }}
             >
               <Text style={styles.btnCancelModalText}>Volver al menú principal</Text>
@@ -356,38 +391,53 @@ export default function ScannerScreen() {
         </View>
       </Modal>
 
-      {/* MODAL DE RESULTADO DE REGISTRO */}
-      <Modal visible={resultModalVisible} animationType="slide" transparent={false}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: modalType === 'success' ? '#f0fdf4' : '#fef2f2' }}>
-          <View style={styles.modalContainer}>
-            {modalType === 'success' ? (
-              <Ionicons name="checkmark-circle" size={100} color="#16a34a" />
-            ) : (
-              <Ionicons name="close-circle" size={100} color="#dc2626" />
-            )}
-            
-            <Text style={[styles.modalTitle, { color: modalType === 'success' ? '#166534' : '#991b1b' }]}>
-              {modalType === 'success' ? modalContext : 'Error'}
+      {/* MODAL DE RESULTADO DE REGISTRO (TARJETA FLOTANTE UNIFICADA) */}
+      <Modal visible={resultModalVisible} animationType="fade" transparent={true}>
+        <View style={styles.backdropModal}>
+          <View style={styles.diagnosticCard}>
+            <View
+              style={[
+                styles.diagnosticIconWrap,
+                { backgroundColor: modalType === 'success' ? '#dcfce7' : '#fef2f2' },
+              ]}
+            >
+              <Ionicons
+                name={modalType === 'success' ? 'checkmark-circle' : 'alert-circle'}
+                size={46}
+                color={modalType === 'success' ? '#16a34a' : '#dc2626'}
+              />
+            </View>
+
+            <Text style={styles.diagnosticTitle}>
+              {modalType === 'success' ? modalContext : 'Aviso de Registro'}
             </Text>
-            
-            <Text style={styles.modalMessage}>{modalMessage}</Text>
-            
+
+            <Text style={styles.diagnosticSubtitle}>{modalMessage}</Text>
+
             {modalType === 'success' ? (
-              <TouchableOpacity style={[styles.modalButton, { backgroundColor: '#16a34a' }]} onPress={closeSuccess}>
-                <Text style={styles.modalButtonText}>Aceptar y volver al inicio</Text>
+              <TouchableOpacity
+                style={[styles.btnRetryModal, { backgroundColor: '#16a34a', marginBottom: 0 }]}
+                onPress={closeSuccess}
+              >
+                <Ionicons name="checkmark" size={18} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.btnRetryModalText}>Aceptar y volver al inicio</Text>
               </TouchableOpacity>
             ) : (
               <>
-                <TouchableOpacity style={[styles.modalButton, { backgroundColor: '#dc2626', marginBottom: 15 }]} onPress={retryScan}>
-                  <Text style={styles.modalButtonText}>Reintentar escaneo</Text>
+                <TouchableOpacity
+                  style={[styles.btnRetryModal, { backgroundColor: '#0d6efd' }]}
+                  onPress={retryScan}
+                >
+                  <Ionicons name="reload" size={18} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.btnRetryModalText}>Reintentar escaneo</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.btnOutlineModal, { width: 250 }]} onPress={closeSuccess}>
-                  <Text style={styles.btnOutlineTextModal}>Volver al inicio</Text>
+                <TouchableOpacity style={styles.btnCancelModal} onPress={closeSuccess}>
+                  <Text style={styles.btnCancelModalText}>Volver al inicio</Text>
                 </TouchableOpacity>
               </>
             )}
           </View>
-        </SafeAreaView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -410,7 +460,20 @@ const styles = StyleSheet.create({
   instructionText: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 20, paddingHorizontal: 10, lineHeight: 20 },
   
   cameraWrapper: { width: 330, height: 330, position: 'relative', marginBottom: 25 },
-  cameraInner: { flex: 1, margin: 15 },
+  cameraInner: { flex: 1, margin: 15, borderRadius: 16, overflow: 'hidden' },
+  laserLine: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    height: 2.5,
+    backgroundColor: '#38bdf8',
+    borderRadius: 2,
+    shadowColor: '#0284c7',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    elevation: 4,
+  },
   cameraPlaceholder: { flex: 1, borderRadius: 20, margin: 15, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center', padding: 20 },
   cameraPlaceholderTitle: { color: '#64748b', marginTop: 15, fontSize: 15, fontWeight: 'bold', textAlign: 'center' },
   cameraPlaceholderText: { color: '#94a3b8', marginTop: 6, fontSize: 12, textAlign: 'center', lineHeight: 18 },

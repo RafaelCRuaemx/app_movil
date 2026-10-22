@@ -29,7 +29,7 @@ export async function pedirPermisosNotificaciones(): Promise<boolean> {
     }
     return finalStatus === 'granted';
   } catch (e) {
-    console.log('Error pidiendo permisos de notificación:', e);
+    if(__DEV__) console.log('Error pidiendo permisos de notificación:', e);
     return false;
   }
 }
@@ -38,7 +38,7 @@ export async function pedirPermisosNotificaciones(): Promise<boolean> {
 export async function programarAlertaComida(minutosAlerta: number = 45): Promise<void> {
   const Notifications = getNotificationsModule();
   if (!Notifications) {
-    console.log('Notificaciones omitidas (entorno Expo Go)');
+    if(__DEV__) console.log('Notificaciones omitidas (entorno Expo Go)');
     return;
   }
 
@@ -66,7 +66,7 @@ export async function programarAlertaComida(minutosAlerta: number = 45): Promise
     // Guardar el ID para poder cancelarla si regresa antes
     await SecureStore.setItemAsync(NOTIF_KEY, notifId);
   } catch (error) {
-    console.log('Error programando alerta de comida:', error);
+    if(__DEV__) console.log('Error programando alerta de comida:', error);
   }
 }
 
@@ -82,6 +82,6 @@ export async function cancelarAlertaComida(): Promise<void> {
       await SecureStore.deleteItemAsync(NOTIF_KEY);
     }
   } catch (error) {
-    console.log('Error cancelando alerta de comida:', error);
+    if(__DEV__) console.log('Error cancelando alerta de comida:', error);
   }
 }

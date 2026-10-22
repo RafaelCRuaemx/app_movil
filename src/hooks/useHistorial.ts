@@ -1,4 +1,5 @@
 import { apiPost } from '@/config/api';
+import { HistoriaRegistro } from '@/types';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 // 1. Constantes y tipos de datos
@@ -25,7 +26,7 @@ export const clasificarEstado = (estadoRaw?: string): CategoriaEstado => {
 };
 
 export function useHistorial(usuarioId?: number | string) {
-  const [historial, setHistorial] = useState<any[]>([]);
+  const [historial, setHistorial] = useState<HistoriaRegistro[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -49,7 +50,7 @@ export function useHistorial(usuarioId?: number | string) {
         setHistorial(json.historial || []);
       }
     } catch (e) {
-      console.log('Error fetching history:', e);
+      if (__DEV__) console.log('Error fetching history:', e);
     } finally {
       setLoading(false);
     }

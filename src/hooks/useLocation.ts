@@ -24,7 +24,7 @@ export function useLocation(){
             }
             return status === 'granted';
         } catch (e: any) {
-            console.log('Error al consultar permisos de ubicacion:', e);
+            if (__DEV__) console.log('Error al consultar permisos de ubicación', e);
             return false;
         }
     }, []);
@@ -36,14 +36,14 @@ export function useLocation(){
         try{
             const tienePermiso = await verificarPermisos(true);
             if (!tienePermiso) {
-                setError('Permiso de ubicacion denegado. Es obligatorio para validar el perimetro de asistencia.');
+                setError('Permiso de ubicación denegado. Es obligatorio para validar el perímetro de asistencia.');
                 //
-                Alert.alert('Ubicacion REquerida', 'Para vliadar el primetro de asisitencia necesitas activar el permiso de ubicacion en los ajustes de tu telefono', 
+                Alert.alert('Ubicación requerida', 'Para vliadar el perímetro de asisitencia necesitas activar el permiso de ubicación en los ajustes de tu teléfono', 
                     [{
                         text: 'Cancelar',
                         style : 'cancel'
                     }, {
-                        text : 'Abrir configuracion', onPress: ()=> Linking.openSettings()
+                        text : 'Abrir configuración', onPress: ()=> Linking.openSettings()
                     }]
                 );
                 setLoading(false);
@@ -79,8 +79,8 @@ export function useLocation(){
             setError('No fue posible determinar la posición GPS.');
             return null;
         } catch (err: any) {
-            console.log('Error obtenido GPS:', err);
-            setError('Error al obtener ubicacion: ' + (err?.message || 'GPS no disponible'));
+            if(__DEV__) console.log('Error obtenido GPS: ', err);
+            setError('Error al obtener ubicación: ' + (err?.message || 'GPS no disponible'));
             return null;
         } finally {
             setLoading(false);

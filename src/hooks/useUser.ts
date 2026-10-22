@@ -1,17 +1,9 @@
+import { Usuario } from "@/types";
 import { router } from "expo-router";
 import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from "react";
 import { Alert } from "react-native";
 
-//1.Definimos la estructura de los datos del usuario
-export interface Usuario{
-    id: number;
-    nombre?: string;
-    email?:string;
-    rol?:string;
-    numero_empleado?:string;
-    [key: string]:any; //permite cualquier otro campo que envie el backend
-}
 
 export function useUser(){
     const [user, setUser] = useState<Usuario | null>(null);
@@ -27,7 +19,7 @@ export function useUser(){
                 setUser(null);
             }
         } catch (error) {
-            console.log('Error al leer usuario de SecureStore:', error);
+            if (__DEV__) console.log('Error al leer usuario de SecureStore:', error);
             setUser(null);
         }finally{
             setLoading(false);
@@ -41,8 +33,8 @@ export function useUser(){
 
     //4. Logica centralizada de cerrar session con confirmación
     const logout = () =>{
-        Alert.alert("Cerrar sesion",
-            "¿Estas seguro de que deseas cerrar tu session actual?",
+        Alert.alert("Cerrar sesión",
+            "¿Estás seguro de que deseas cerrar tu sessión actual?",
             [
                 {text: "Cancelar", style:"cancel"},
                 {
@@ -59,7 +51,7 @@ export function useUser(){
                             // Redirigimos al login
                             router.replace('/login' as any);
                         } catch (e) {
-                            console.log('Error durante el logout: ', e);
+                            if(__DEV__) console.log('Error durante el logout: ', e);
                         }
                     }
                 }

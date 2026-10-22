@@ -36,7 +36,7 @@ export default function PerfilScreen() {
           <Text style={styles.headerTitle}>Mi perfil</Text>
         </View>
 
-        <View style={styles.avatarSection}>
+               <View style={styles.avatarSection}>
           <View style={styles.avatarBox}>
             <Text style={styles.avatarInitials}>
               {perfilData?.nombre ? getInitials(perfilData.nombre) : 'RC'}
@@ -44,22 +44,65 @@ export default function PerfilScreen() {
           </View>
           <Text style={styles.name}>{userName}</Text>
           <Text style={styles.email}>{userEmail}</Text>
+          <View style={styles.roleBadge}>
+            <Ionicons name="shield-checkmark-outline" size={14} color="#0d6efd" style={{ marginRight: 5 }} />
+            <Text style={styles.roleBadgeText}>{userRole}</Text>
+          </View>
         </View>
 
         <View ref={registrarElementoTour('perfil_datos')} collapsable={false} style={styles.card}>
-          <InfoRow label="OFICINA" value={perfilData?.oficina || "--"} />
-          <InfoRow label="ROL" value={userRole} />
-          <InfoRow label="DÍAS LAB." value={perfilData?.dias_lab || "--"} />
-          <InfoRow label="ENTRADA" value={perfilData?.entrada || "--"} />
-          <InfoRow label="SALIDA" value={perfilData?.salida || "--"} />
-          <InfoRow label="CREACIÓN" value={perfilData?.fecha_ingreso || "--"} noBorder />
+          <InfoRow
+            icon="business-outline"
+            iconColor="#0284c7"
+            iconBg="#e0f2fe"
+            label="OFICINA"
+            value={perfilData?.oficina || "--"}
+          />
+          <InfoRow
+            icon="ribbon-outline"
+            iconColor="#4f46e5"
+            iconBg="#eef2ff"
+            label="ROL"
+            value={userRole}
+          />
+          <InfoRow
+            icon="calendar-outline"
+            iconColor="#16a34a"
+            iconBg="#dcfce7"
+            label="DÍAS LAB."
+            value={perfilData?.dias_lab || "--"}
+          />
+          <InfoRow
+            icon="sunny-outline"
+            iconColor="#d97706"
+            iconBg="#fef3c7"
+            label="ENTRADA"
+            value={perfilData?.entrada || "--"}
+          />
+          <InfoRow
+            icon="moon-outline"
+            iconColor="#0d6efd"
+            iconBg="#eff6ff"
+            label="SALIDA"
+            value={perfilData?.salida || "--"}
+          />
+          <InfoRow
+            icon="time-outline"
+            iconColor="#475569"
+            iconBg="#f1f5f9"
+            label="CREACIÓN"
+            value={perfilData?.fecha_ingreso || "--"}
+            noBorder
+          />
         </View>
 
         <View ref={registrarElementoTour('perfil_logout')} collapsable={false} style={{ marginBottom: 40 }}>
           <TouchableOpacity style={[styles.logoutCard, { marginBottom: 0 }]} onPress={logout}>
             <View style={styles.logoutContent}>
-              <Ionicons name="log-out-outline" size={24} color="#dc3545" style={{ transform: [{ rotate: '180deg' }] }} />
-              <Text style={styles.logoutText}>Cerrar sesion</Text>
+              <View style={[styles.iconBox, { backgroundColor: '#fef2f2' }]}>
+                <Ionicons name="log-out-outline" size={20} color="#dc2626" style={{ transform: [{ rotate: '180deg' }] }} />
+              </View>
+              <Text style={styles.logoutText}>Cerrar sesión</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#94a3b8" />
           </TouchableOpacity>
@@ -70,9 +113,26 @@ export default function PerfilScreen() {
   );
 }
 
-function InfoRow({ label, value, noBorder }: { label: string, value: string, noBorder?: boolean }) {
+function InfoRow({
+  icon,
+  iconColor,
+  iconBg,
+  label,
+  value,
+  noBorder,
+}: {
+  icon: any;
+  iconColor: string;
+  iconBg: string;
+  label: string;
+  value: string;
+  noBorder?: boolean;
+}) {
   return (
     <View style={[styles.infoRow, !noBorder && styles.rowBorder]}>
+      <View style={[styles.iconBox, { backgroundColor: iconBg }]}>
+        <Ionicons name={icon} size={18} color={iconColor} />
+      </View>
       <Text style={styles.infoLabel}>{label}</Text>
       <Text style={styles.infoValue}>{value}</Text>
     </View>
@@ -80,43 +140,71 @@ function InfoRow({ label, value, noBorder }: { label: string, value: string, noB
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#ffffff' },
+  safeArea: { flex: 1, backgroundColor: '#f8fafc' },
   container: { flex: 1, paddingHorizontal: 20 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingVertical: 20, marginTop: 10 },
-  backButton: { marginRight: 15 },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#0f172a' },
-  avatarSection: { alignItems: 'center', marginBottom: 30, marginTop: 10 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18, marginTop: 4 },
+  headerTitle: { fontSize: 20, fontWeight: '800', color: '#0f172a' },
+  avatarSection: { alignItems: 'center', marginBottom: 24, marginTop: 4 },
   avatarBox: {
-    width: 100, height: 100, 
-    backgroundColor: '#1e293b', borderRadius: 30, 
-    justifyContent: 'center', alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, 
-    shadowOpacity: 0.1, shadowRadius: 15, elevation: 5,
-    marginBottom: 15, position: 'relative'
+    width: 92,
+    height: 92,
+    backgroundColor: '#1e293b',
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 5,
+    marginBottom: 14,
   },
-  avatarImage: { width: '100%', height: '100%', borderRadius: 30 },
-  avatarInitials: { color: 'white', fontSize: 32, fontWeight: 'bold' },
-  cameraBadge: {
-    position: 'absolute', bottom: -5, right: -5,
-    backgroundColor: '#0ea5e9', width: 34, height: 34,
-    borderRadius: 17, justifyContent: 'center', alignItems: 'center',
-    borderWidth: 3, borderColor: '#ffffff'
+  avatarInitials: { color: 'white', fontSize: 30, fontWeight: 'bold' },
+  name: { fontSize: 21, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
+  email: { fontSize: 14, color: '#64748b', marginTop: 3 },
+  roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    marginTop: 10,
   },
-  name: { fontSize: 22, fontWeight: 'bold', color: '#0f172a' },
-  email: { fontSize: 16, color: '#64748b', marginTop: 4 },
+  roleBadgeText: { color: '#0d6efd', fontSize: 12, fontWeight: '700' },
   card: {
-    backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0',
-    paddingHorizontal: 20, marginBottom: 20
+    backgroundColor: '#ffffff',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 16,
+    marginBottom: 16,
   },
-  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
   rowBorder: { borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  infoLabel: { width: 90, fontSize: 12, fontWeight: '700', color: '#64748b', letterSpacing: 0.5 },
-  infoValue: { flex: 1, fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  iconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  infoLabel: { width: 85, fontSize: 11.5, fontWeight: '700', color: '#64748b', letterSpacing: 0.4 },
+  infoValue: { flex: 1, fontSize: 14.5, fontWeight: '700', color: '#0f172a', textAlign: 'right' },
   logoutCard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0',
-    padding: 20, marginBottom: 40
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ffffff',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#fee2e2',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   logoutContent: { flexDirection: 'row', alignItems: 'center' },
-  logoutText: { color: '#dc3545', fontSize: 16, fontWeight: 'bold', marginLeft: 10 }
+  logoutText: { color: '#dc2626', fontSize: 15, fontWeight: '700' },
 });
