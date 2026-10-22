@@ -1,18 +1,19 @@
 import { estaTourActivo, iniciarTourGlobal, registrarElementoTour, verificarTourPrimeraVez } from '@/components/OnboardingModal';
+import { CameraViewFrame } from '@/components/scanner/CameraViewFrame';
+import { HomeOfficeScannerCard } from '@/components/scanner/HomeOfficeScannerCard';
+import { PreflightDiagnosticModal } from '@/components/scanner/PreflightDiagnosticModal';
+import { ScanResultModal } from '@/components/scanner/ScanResultModal';
 import { useBiometrics } from '@/hooks/useBiometrics';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useLocation } from '@/hooks/useLocation';
 import { useQRScanner } from '@/hooks/useQRScanner';
 import { useUser } from '@/hooks/useUser';
 import { Ionicons } from '@expo/vector-icons';
-import { CameraView } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const BARCODE_SETTINGS = { barcodeTypes: ['qr' as const] };
 
 export default function ScannerScreen() {
   const [isFocused, setIsFocused] = useState(true);
@@ -20,9 +21,7 @@ export default function ScannerScreen() {
   useFocusEffect(
     useCallback(() => {
       setIsFocused(true);
-      return () => {
-        setIsFocused(false);
-      };
+      return () => setIsFocused(false);
     }, [])
   );
 
@@ -36,10 +35,8 @@ export default function ScannerScreen() {
     setCameraActive,
     scanned,
     setScanned,
-    loading,
     validatingPreflight,
     preflightData,
-    preflightErrors,
     preflightFailedModal,
     setPreflightFailedModal,
     isHomeOffice,
@@ -61,7 +58,7 @@ export default function ScannerScreen() {
   const validacionInicialEjecutada = useRef(false);
   const laserAnim = useRef(new Animated.Value(14)).current;
 
-  // Animación continua de la línea láser mientras la cámara está activa
+  // Animación continua de la línea láser
   useEffect(() => {
     if (cameraActive && !scanned) {
       laserAnim.setValue(14);
@@ -86,7 +83,7 @@ export default function ScannerScreen() {
     }
   }, [cameraActive, scanned, laserAnim]);
 
-  // Primero verificamos si debe abrirse el Tour Guiado; solo si NO está activo el tour validamos red/GPS
+  // Validación inicial de entorno si el tour no está activo
   useEffect(() => {
     if (!userData?.id || validacionInicialEjecutada.current) return;
     validacionInicialEjecutada.current = true;
@@ -99,11 +96,9 @@ export default function ScannerScreen() {
     })();
   }, [userData?.id, validarYIniciarCamara, userData]);
 
-  // Registro directo en modalidad Home Office con huella digital (sin QR)
   const registrarHomeOfficeDirecto = async () => {
     if (!userData?.id) return;
 
-    // Validación obligatoria con huella digital / Face ID en Home Office
     const ok = await autenticar('Usa tu huella para registrar asistencia en Home Office');
     if (!ok) {
       Alert.alert('Autenticación requerida', 'Debes validar tu huella digital para registrar asistencia en Home Office.');
@@ -176,39 +171,7 @@ export default function ScannerScreen() {
         )}
 
         {isHomeOffice ? (
-          <View ref={registrarElementoTour('scanner_marco')} collapsable={false} style={styles.hoContainerCard}>
-            <View style={styles.hoIconLargeWrap}>
-              <Ionicons name="finger-print" size={54} color="#0284c7" />
-            </View>
-            <Text style={styles.hoMainTitle}>Modalidad Home Office</Text>
-            <Text style={styles.hoMainDesc}>
-              El escaneo de código QR de oficina está inhabilitado para tu jornada remota. Por favor registra tu asistencia con tu huella digital.
-            </Text>
-
-            <View ref={registrarElementoTour('scanner_boton')} collapsable={false} style={{ width: '100%', marginBottom: 10 }}>
-              <TouchableOpacity 
-                style={[styles.btnHoBiometric, { marginBottom: 0 }, loadingHO && { opacity: 0.7 }]} 
-                onPress={registrarHomeOfficeDirecto}
-                disabled={loadingHO}
-              >
-                {loadingHO ? (
-                  <ActivityIndicator size="small" color="#ffffff" style={{ marginRight: 8 }} />
-                ) : (
-                  <Ionicons name="finger-print" size={22} color="#ffffff" style={{ marginRight: 8 }} />
-                )}
-                <Text style={styles.btnHoBiometricText}>
-                  {loadingHO ? 'Validando huella...' : 'Checar con Huella Digital'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity 
-              style={[styles.btnOutline, { marginTop: 10 }]} 
-              onPress={() => router.replace('/(tab)/' as any)}
-            >
-              <Text style={styles.btnOutlineText}>Ir al Dashboard</Text>
-            </TouchableOpacity>
-          </View>
+          <HomeOfficeScannerCard loadingHO={loadingHO} registrarHomeOfficeDirecto={registrarHomeOfficeDirecto} />
         ) : (
           <>
             <Text style={styles.instructionText}>
@@ -217,64 +180,17 @@ export default function ScannerScreen() {
                 : 'Se validará tu conexión a la red de la oficina y tu ubicación GPS antes de activar la cámara.'}
             </Text>
 
-            <View ref={registrarElementoTour('scanner_marco')} collapsable={false} style={styles.cameraWrapper}>
-              <View style={[styles.corner, styles.cornerTL]} />
-              <View style={[styles.corner, styles.cornerTR]} />
-              <View style={[styles.corner, styles.cornerBL]} />
-              <View style={[styles.corner, styles.cornerBR]} />
-
-              {!cameraActive ? (
-                 <View style={styles.cameraPlaceholder}>
-                   {validatingPreflight ? (
-                     <>
-                       <ActivityIndicator size="large" color="#0d6efd" />
-                       <Text style={[styles.cameraPlaceholderTitle, { color: '#0d6efd' }]}>Validando requisitos...</Text>
-                       <Text style={styles.cameraPlaceholderText}>Comprobando red Wi-Fi y distancia GPS...</Text>
-                     </>
-                   ) : (
-                     <>
-                       <Ionicons name="shield-checkmark-outline" size={48} color="#cbd5e1" />
-                       <Text style={styles.cameraPlaceholderTitle}>Validación previa requerida</Text>
-                       <Text style={styles.cameraPlaceholderText}>Presiona el botón para comprobar Wi-Fi y ubicación</Text>
-                     </>
-                   )}
-                 </View>
-              ) : (
-                <View style={styles.cameraInner}>
-                  {isFocused && (
-                    <CameraView 
-                      style={StyleSheet.absoluteFill} 
-                      facing="back"
-                      enableTorch={torch}
-                      barcodeScannerSettings={BARCODE_SETTINGS}
-                      onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-                    />
-                  )}
-                  {!scanned && (
-                    <Animated.View
-                      pointerEvents="none"
-                      style={[
-                        styles.laserLine,
-                        { transform: [{ translateY: laserAnim }] },
-                      ]}
-                    />
-                  )}
-                  <TouchableOpacity
-                    style={[styles.torchButton, torch && styles.torchButtonActive]}
-                    onPress={() => setTorch(!torch)}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name={torch ? 'flashlight' : 'flashlight-outline'} size={22} color="#ffffff" />
-                  </TouchableOpacity>
-
-                  {scanned && (
-                    <View style={styles.scannedOverlay}>
-                      <ActivityIndicator size="large" color="#0d6efd" />
-                      <Text style={{ marginTop: 10, fontWeight: 'bold', color: '#0d6efd' }}>Procesando lectura...</Text>
-                    </View>
-                  )}
-                </View>
-              )}
+            <View ref={registrarElementoTour('scanner_marco')} collapsable={false}>
+              <CameraViewFrame
+                cameraActive={cameraActive}
+                validatingPreflight={validatingPreflight}
+                isFocused={isFocused}
+                torch={torch}
+                setTorch={setTorch}
+                scanned={scanned}
+                laserAnim={laserAnim}
+                handleBarCodeScanned={handleBarCodeScanned}
+              />
             </View>
 
             <View ref={registrarElementoTour('scanner_boton')} collapsable={false} style={{ width: '100%', marginBottom: 12 }}>
@@ -319,126 +235,26 @@ export default function ScannerScreen() {
         )}
       </ScrollView>
 
-      {/* MODAL DE FALLA EN PRE-VUELO (RED O GEOCERCA NO CUMPLIDAS) */}
-      <Modal visible={preflightFailedModal && !estaTourActivo()} animationType="fade" transparent={true}>
-        <View style={styles.backdropModal}>
-          <View style={styles.diagnosticCard}>
-            <View style={styles.diagnosticIconWrap}>
-              <Ionicons name="alert-circle" size={44} color="#dc2626" />
-            </View>
-            <Text style={styles.diagnosticTitle}>Validación no superada</Text>
-            <Text style={styles.diagnosticSubtitle}>
-              No es posible abrir la cámara para checar debido a que no cumples los requisitos de seguridad:
-            </Text>
+      {/* MODAL DE FALLA EN PRE-VUELO */}
+      <PreflightDiagnosticModal
+        visible={preflightFailedModal && !estaTourActivo()}
+        preflightData={preflightData}
+        onRetry={() => {
+          setPreflightFailedModal(false);
+          validarYIniciarCamara();
+        }}
+        onClose={() => setPreflightFailedModal(false)}
+      />
 
-            <View style={styles.diagnosticList}>
-              {/* DIAGNÓSTICO RED WI-FI */}
-              <View style={styles.diagnosticItem}>
-                <Ionicons 
-                  name={preflightData?.red_autorizada === false ? "close-circle" : "checkmark-circle"} 
-                  size={22} 
-                  color={preflightData?.red_autorizada === false ? "#dc2626" : "#16a34a"} 
-                />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.diagnosticItemTitle}>Red Wi-Fi de la Oficina</Text>
-                  <Text style={styles.diagnosticItemDesc}>
-                    {preflightData?.red_autorizada === false 
-                      ? 'No estás conectado a la red Wi-Fi corporativa registrada.' 
-                      : 'Conectado a la red de la oficina.'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* DIAGNÓSTICO GEOCERCA */}
-              <View style={styles.diagnosticItem}>
-                <Ionicons 
-                  name={preflightData?.geocerca_autorizada === false ? "close-circle" : "checkmark-circle"} 
-                  size={22} 
-                  color={preflightData?.geocerca_autorizada === false ? "#dc2626" : "#16a34a"} 
-                />
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.diagnosticItemTitle}>Ubicación y Rango de Oficina</Text>
-                  <Text style={styles.diagnosticItemDesc}>
-                    {preflightData?.geocerca_autorizada === false
-                      ? `Estás a ${preflightData.distancia_metros ?? '?'}m de la oficina. El rango máximo permitido es de ${preflightData.radio_permitido ?? 100}m.`
-                      : 'Dentro del radio permitido.'}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <TouchableOpacity 
-              style={styles.btnRetryModal} 
-              onPress={() => {
-                setPreflightFailedModal(false);
-                validarYIniciarCamara();
-              }}
-            >
-              <Ionicons name="reload" size={18} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.btnRetryModalText}>Reintentar comprobación</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.btnCancelModal} 
-              onPress={() => {
-                setPreflightFailedModal(false);
-                router.replace('/(tab)/' as any);
-              }}
-            >
-              <Text style={styles.btnCancelModalText}>Volver al menú principal</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* MODAL DE RESULTADO DE REGISTRO (TARJETA FLOTANTE UNIFICADA) */}
-      <Modal visible={resultModalVisible} animationType="fade" transparent={true}>
-        <View style={styles.backdropModal}>
-          <View style={styles.diagnosticCard}>
-            <View
-              style={[
-                styles.diagnosticIconWrap,
-                { backgroundColor: modalType === 'success' ? '#dcfce7' : '#fef2f2' },
-              ]}
-            >
-              <Ionicons
-                name={modalType === 'success' ? 'checkmark-circle' : 'alert-circle'}
-                size={46}
-                color={modalType === 'success' ? '#16a34a' : '#dc2626'}
-              />
-            </View>
-
-            <Text style={styles.diagnosticTitle}>
-              {modalType === 'success' ? modalContext : 'Aviso de Registro'}
-            </Text>
-
-            <Text style={styles.diagnosticSubtitle}>{modalMessage}</Text>
-
-            {modalType === 'success' ? (
-              <TouchableOpacity
-                style={[styles.btnRetryModal, { backgroundColor: '#16a34a', marginBottom: 0 }]}
-                onPress={closeSuccess}
-              >
-                <Ionicons name="checkmark" size={18} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.btnRetryModalText}>Aceptar y volver al inicio</Text>
-              </TouchableOpacity>
-            ) : (
-              <>
-                <TouchableOpacity
-                  style={[styles.btnRetryModal, { backgroundColor: '#0d6efd' }]}
-                  onPress={retryScan}
-                >
-                  <Ionicons name="reload" size={18} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.btnRetryModalText}>Reintentar escaneo</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.btnCancelModal} onPress={closeSuccess}>
-                  <Text style={styles.btnCancelModalText}>Volver al inicio</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
+      {/* MODAL DE RESULTADO */}
+      <ScanResultModal
+        visible={resultModalVisible}
+        modalType={modalType}
+        modalContext={modalContext}
+        modalMessage={modalMessage}
+        onCloseSuccess={closeSuccess}
+        onRetryScan={retryScan}
+      />
     </SafeAreaView>
   );
 }
@@ -448,86 +264,55 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', justifyContent: 'space-between' },
   backButton: { padding: 5, marginLeft: -5 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a' },
-  container: { alignItems: 'center', padding: 20, backgroundColor: '#ffffff' },
-  officeBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16, marginBottom: 15 },
-  officeTextNormal: { fontSize: 14, color: '#475569' },
-  officeTextBold: { fontSize: 14, fontWeight: 'bold', color: '#0d6efd' },
-  
-  hoBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f0f9ff', borderWidth: 1, borderColor: '#bae6fd', borderRadius: 10, padding: 12, marginBottom: 15, width: '100%' },
+  container: { padding: 24, alignItems: 'center' },
+  officeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginBottom: 20,
+  },
+  officeTextNormal: { color: '#64748b', fontSize: 14 },
+  officeTextBold: { color: '#0f172a', fontSize: 14, fontWeight: 'bold' },
+  hoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
+    width: '100%',
+  },
   hoBannerTitle: { fontSize: 14, fontWeight: 'bold', color: '#0369a1' },
   hoBannerText: { fontSize: 12, color: '#0284c7', marginTop: 2 },
-
-  instructionText: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 20, paddingHorizontal: 10, lineHeight: 20 },
-  
-  cameraWrapper: { width: 330, height: 330, position: 'relative', marginBottom: 25 },
-  cameraInner: { flex: 1, margin: 15, borderRadius: 16, overflow: 'hidden' },
-  laserLine: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    height: 2.5,
-    backgroundColor: '#38bdf8',
-    borderRadius: 2,
-    shadowColor: '#0284c7',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 6,
-    elevation: 4,
+  instructionText: { fontSize: 14, color: '#64748b', textAlign: 'center', marginBottom: 20, paddingHorizontal: 10 },
+  btnPrimary: {
+    flexDirection: 'row',
+    backgroundColor: '#0d6efd',
+    paddingVertical: 16,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
   },
-  cameraPlaceholder: { flex: 1, borderRadius: 20, margin: 15, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  cameraPlaceholderTitle: { color: '#64748b', marginTop: 15, fontSize: 15, fontWeight: 'bold', textAlign: 'center' },
-  cameraPlaceholderText: { color: '#94a3b8', marginTop: 6, fontSize: 12, textAlign: 'center', lineHeight: 18 },
-  
-  scannedOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.9)', justifyContent: 'center', alignItems: 'center' },
-  torchButton: { position: 'absolute', bottom: 14, right: 14, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center' },
-  torchButtonActive: { backgroundColor: '#0d6efd' },
-  
-  corner: { position: 'absolute', width: 40, height: 40, borderColor: '#0d6efd' },
-  cornerTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 20 },
-  cornerTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 20 },
-  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 20 },
-  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 20 },
-  
-  footerText: { fontSize: 13, color: '#94a3b8', textAlign: 'center', marginTop: 15 },
-  
-  btnPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#0d6efd', borderRadius: 12, paddingVertical: 14, marginBottom: 12 },
-  btnPrimaryText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
-
-  btnOutline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#0d6efd', borderRadius: 12, paddingVertical: 14, marginBottom: 12 },
-  btnOutlineText: { color: '#0d6efd', fontSize: 16, fontWeight: '600' },
-
-  btnHomeOffice: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#e0f2fe', borderWidth: 1, borderColor: '#7dd3fc', borderRadius: 12, paddingVertical: 13, marginBottom: 10 },
-  btnHomeOfficeText: { color: '#0369a1', fontSize: 14, fontWeight: 'bold' },
-
-  // Estilos de Home Office Biométrico
-  hoContainerCard: { width: '100%', backgroundColor: '#f0f9ff', borderRadius: 20, borderWidth: 1, borderColor: '#bae6fd', padding: 24, alignItems: 'center', marginBottom: 20 },
-  hoIconLargeWrap: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#e0f2fe', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-  hoMainTitle: { fontSize: 18, fontWeight: 'bold', color: '#0369a1', textAlign: 'center', marginBottom: 8 },
-  hoMainDesc: { fontSize: 13, color: '#0284c7', textAlign: 'center', marginBottom: 24, lineHeight: 18 },
-  btnHoBiometric: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', backgroundColor: '#0284c7', borderRadius: 12, paddingVertical: 14, marginBottom: 10 },
-  btnHoBiometricText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
-
-  // Modal Diagnóstico de Pre-vuelo
-  backdropModal: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  diagnosticCard: { backgroundColor: '#ffffff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 360, alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
-  diagnosticIconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fef2f2', justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-  diagnosticTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a', textAlign: 'center', marginBottom: 8 },
-  diagnosticSubtitle: { fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 20, lineHeight: 18 },
-  diagnosticList: { width: '100%', backgroundColor: '#f8fafc', borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#f1f5f9' },
-  diagnosticItem: { flexDirection: 'row', alignItems: 'flex-start', marginVertical: 6 },
-  diagnosticItemTitle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b' },
-  diagnosticItemDesc: { fontSize: 12, color: '#64748b', marginTop: 2, lineHeight: 16 },
-  btnRetryModal: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0d6efd', width: '100%', paddingVertical: 13, borderRadius: 10, marginBottom: 10 },
-  btnRetryModalText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
-  btnCancelModal: { paddingVertical: 10, alignItems: 'center', width: '100%' },
-  btnCancelModalText: { color: '#64748b', fontSize: 14, fontWeight: '500' },
-
-  // Modal Resultado
-  modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 },
-  modalTitle: { fontSize: 24, fontWeight: 'bold', marginTop: 20, textAlign: 'center' },
-  modalMessage: { fontSize: 16, color: '#475569', textAlign: 'center', marginTop: 15, marginBottom: 40, lineHeight: 24 },
-  modalButton: { width: 250, paddingVertical: 16, borderRadius: 12, alignItems: 'center', elevation: 2 },
-  modalButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  btnOutlineModal: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: '#0d6efd', borderRadius: 12, paddingVertical: 16 },
-  btnOutlineTextModal: { color: '#0d6efd', fontSize: 16, fontWeight: '600' }
+  btnPrimaryText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
+  btnOutline: {
+    flexDirection: 'row',
+    paddingVertical: 14,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+    width: '100%',
+  },
+  btnOutlineText: { color: '#0d6efd', fontSize: 14, fontWeight: '600' },
+  footerText: { fontSize: 12, color: '#94a3b8', textAlign: 'center', marginTop: 8 },
 });
